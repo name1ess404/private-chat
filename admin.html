@@ -5,91 +5,248 @@
     <title>Admin Dashboard</title>
     <style>
         :root { --bg: #0d1117; --card: #161b22; --text: #c9d1d9; --border: #30363d; --accent: #1f6feb; --danger: #da3633; --success: #238636; --warning: #d29922; }
-        body { background: var(--bg); color: var(--text); font-family: 'Inter', sans-serif; display: flex; height: 100vh; margin: 0; }
-        #sidebar { width: 60%; border-right: 1px solid var(--border); padding: 20px; overflow-y: auto; }
-        #tools { width: 40%; padding: 20px; background: #090c10; }
-        .section { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 15px; margin-bottom: 20px; }
-        button { border: none; padding: 6px 10px; border-radius: 4px; cursor: pointer; font-size: 0.75rem; font-weight: bold; margin: 2px; }
+        * { box-sizing: border-box; }
+        body { background: var(--bg); color: var(--text); font-family: 'Inter', -apple-system, sans-serif; margin: 0; display: flex; height: 100vh; overflow: hidden; }
+        #sidebar { width: 60%; border-right: 1px solid var(--border); padding: 25px; overflow-y: auto; }
+        #tools { width: 40%; padding: 25px; background: #090c10; overflow-y: auto; }
+        .section { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 20px; margin-bottom: 25px; }
+        h3 { margin-top: 0; border-bottom: 1px solid var(--border); padding-bottom: 12px; font-size: 1.1rem; color: #f0f6fc; }
+        table { width: 100%; border-collapse: collapse; }
+        td { padding: 14px 8px; border-bottom: 1px solid var(--border); font-size: 0.9rem; }
+        .uid-label { font-family: monospace; font-size: 0.7rem; color: #8b949e; display: block; margin-top: 4px; }
+        .badge { font-size: 0.65rem; padding: 3px 7px; border-radius: 4px; background: var(--accent); color: white; margin-left: 8px; font-weight: bold; }
+        .status-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #30363d; margin-right: 8px; }
+        .status-dot.online { background: var(--success); box-shadow: 0 0 6px var(--success); }
+        button { border: none; padding: 8px 14px; border-radius: 6px; cursor: pointer; font-weight: 700; font-size: 0.75rem; margin: 2px; transition: opacity 0.2s; }
+        button:hover { opacity: 0.8; }
         .btn-success { background: var(--success); color: white; }
         .btn-danger { background: var(--danger); color: white; }
         .btn-warning { background: var(--warning); color: white; }
-        .btn-promote { background: #8957e5; color: white; }
-        table { width: 100%; border-collapse: collapse; }
-        td { padding: 10px 5px; border-bottom: 1px solid var(--border); }
+        .btn-action { background: #30363d; color: white; }
+        .btn-kick { background: #f85149; color: white; }
+        textarea { width: 100%; background: #000; color: #fff; border: 1px solid var(--border); padding: 12px; border-radius: 6px; resize: none; font-family: inherit; font-size: 0.9rem; }
+        #status-overlay { position: fixed; inset: 0; background: var(--bg); display: flex; justify-content: center; align-items: center; z-index: 100; font-weight: bold; font-size: 1.2rem; }
+        .msg-preview-item { padding: 10px; border-bottom: 1px solid var(--border); font-size: 0.85rem; }
+        .msg-preview-item:hover { background: rgba(255,255,255,0.05); }
     </style>
 </head>
 <body>
+
+<div id="status-overlay">AUTHORIZING...</div>
+
 <div id="sidebar">
-    <div class="section"><h3>Member Requests</h3><table><tbody id="requestTable"></tbody></table></div>
-    <div class="section"><h3>Chat Members</h3><table><tbody id="userTable"></tbody></table></div>
-    <div class="section"><h3>Recent Messages (Pin)</h3><div id="messageList"></div></div>
+    <div class="section"><h3>Pending Requests</h3><table><tbody id="requestTable"></tbody></table></div>
+    <div class="section"><h3>Network Members</h3><table><tbody id="userTable"></tbody></table></div>
+    <div class="section">
+        <h3>Recent Messages (Pin Tool)</h3>
+        <div id="messageList" style="max-height: 300px; overflow-y: auto;"></div>
+    </div>
 </div>
+
 <div id="tools">
-    <div class="section"><h3>Settings</h3><button id="maintBtn" style="width:100%" onclick="toggleMaint()">...</button></div>
-    <div class="section"><h3>Pin</h3><div id="active-pin" style="color:var(--warning)">None</div><button class="btn-danger" style="width:100%; margin-top:10px;" onclick="unpin()">Unpin</button></div>
-    <div class="section"><h3>Announcement</h3><textarea id="ann-msg" style="width:100%; height:60px;"></textarea><button class="btn-success" style="width:100%; margin-top:10px;" onclick="sendAnn()">Send</button></div>
+    <h3>System Controls</h3>
+    <div class="section">
+        <p style="font-size:0.85rem; opacity:0.7; margin-bottom: 10px;">Maintenance Mode</p>
+        <button id="maintBtn" style="width:100%; padding:12px;" onclick="toggleMaint()">Loading Status...</button>
+    </div>
+    <div class="section">
+        <p style="font-size:0.85rem; opacity:0.7; margin-bottom: 10px;">Pinned Message</p>
+        <div id="active-pin" style="font-size: 0.8rem; margin-bottom: 10px; color: var(--warning);">None</div>
+        <button class="btn-danger" style="width:100%;" onclick="unpinMessage()">Remove Pin</button>
+    </div>
+    <div class="section">
+        <p style="font-size:0.85rem; opacity:0.7; margin-bottom: 10px;">Global Announcement</p>
+        <textarea id="ann-msg" rows="3" placeholder="Type message..."></textarea>
+        <button class="btn-success" style="width:100%; margin-top:10px; padding: 10px;" onclick="sendAnn()">Broadcast Message</button>
+    </div>
+    <button class="btn-danger" style="width:100%; padding:12px; opacity:0.6;" onclick="wipeChat()">Wipe Chat History (Safe)</button>
 </div>
 
 <script type="module">
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm'
-const supabase = createClient("https://pgdytywttdrqakczrprg.supabase.co", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBnZHl0eXd0dGRycWFrY3pycHJnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY1MzMzMjYsImV4cCI6MjA5MjEwOTMyNn0.Owa5xlrvrw0p0lJ1AEqIxnudvTyxSSjKqZgX48j2KQA");
 
-let myId = null;
+const SUPABASE_URL = "https://pgdytywttdrqakczrprg.supabase.co";
+const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBnZHl0eXd0dGRycWFrY3pycHJnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY1MzMzMjYsImV4cCI6MjA5MjEwOTMyNn0.Owa5xlrvrw0p0lJ1AEqIxnudvTyxSSjKqZgX48j2KQA";
+const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
-async function init() {
-    const { data: { session } } = await supabase.auth.getSession();
-    myId = session?.user.id;
-    supabase.channel('admin_live').on('postgres_changes', { event: '*', schema: 'public' }, () => load()).subscribe();
-    load();
+let myUser = null;
+
+async function checkAuth() {
+    let { data: { session } } = await supabase.auth.getSession();
+    if (!session) {
+        const { data } = await supabase.auth.signInAnonymously();
+        session = data.session;
+    }
+    myUser = session.user;
+
+    const { data: profile } = await supabase.from('allowed_users').select('*').eq('id', myUser.id).single();
+    
+    if (profile && profile.role === 'admin') {
+        document.getElementById("status-overlay").style.display = "none";
+        initDashboard();
+    } else {
+        document.body.innerHTML = "<h1 style='text-align:center; padding-top:50px; color:white;'>UNAUTHORIZED ACCESS</h1>";
+    }
 }
 
-async function load() {
-    const { data: users } = await supabase.from('allowed_users').select('*');
-    const { data: msgs } = await supabase.from('messages').select('*').order('time', { ascending: false }).limit(10);
-    const { data: sett } = await supabase.from('system_settings').select('*');
+function initDashboard() {
+    setupRealtime();
+    loadMessages();
+}
 
-    const ut = document.getElementById("userTable");
-    const rt = document.getElementById("requestTable");
-    ut.innerHTML = rt.innerHTML = "";
+async function setupRealtime() {
+    // Listen for Settings changes (Maintenance & Pin)
+    supabase.channel('system_updates')
+        .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'system_settings' }, () => {
+            syncSystemUI();
+        })
+        .subscribe();
+
+    // Listen for User/Request changes
+    supabase.channel('user_updates')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'allowed_users' }, () => {
+            loadMembers();
+        })
+        .subscribe();
+
+    // Listen for New Messages (to update pin tool list)
+    supabase.channel('msg_updates')
+        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, () => {
+            loadMessages();
+        })
+        .subscribe();
+
+    // Initial Loads
+    syncSystemUI();
+    loadMembers();
+}
+
+async function syncSystemUI() {
+    const { data: settings } = await supabase.from('system_settings').select('*');
+    
+    // Maint UI
+    const maint = settings.find(s => s.key === 'maintenance')?.value?.enabled;
+    const btn = document.getElementById("maintBtn");
+    btn.innerText = maint ? "DISABLE MAINTENANCE" : "ENABLE MAINTENANCE";
+    btn.className = maint ? "btn-success" : "btn-warning";
+
+    // Pin UI
+    const pin = settings.find(s => s.key === 'pin')?.value;
+    const pinDiv = document.getElementById("active-pin");
+    pinDiv.innerText = (pin && pin.msg) ? "Current: " + pin.msg : "None";
+}
+
+async function loadMembers() {
+    const { data: users } = await supabase.from('allowed_users').select('*');
+    
+    const reqTable = document.getElementById("requestTable");
+    const userTable = document.getElementById("userTable");
+    reqTable.innerHTML = "";
+    userTable.innerHTML = "";
 
     users?.forEach(u => {
-        const row = `<tr><td>${u.username}</td><td style="text-align:right">
-            <button class="btn-warning" onclick="rename('${u.id}')">Rename</button>
-            ${u.id !== myId ? `
-                <button class="btn-danger" onclick="kick('${u.id}')">Kick</button>
-                <button class="btn-promote" onclick="updateRole('${u.id}','admin')">Promote</button>
-            ` : ''}
-            ${u.role === 'pending' ? `<button class="btn-success" onclick="updateRole('${u.id}','user')">Allow</button>` : ''}
-        </td></tr>`;
-        if(u.role === 'pending') rt.innerHTML += row; else ut.innerHTML += row;
+        if (u.role === 'pending') {
+            reqTable.innerHTML += `<tr><td><b>${u.username}</b><span class="uid-label">${u.id}</span></td>
+                <td style="text-align:right"><button class="btn-success" onclick="approve('${u.id}', '${u.username}')">Allow</button>
+                <button class="btn-danger" onclick="decline('${u.id}')">Deny</button></td></tr>`;
+        } else if (u.role !== 'declined') {
+            const isOnline = (Date.now() - (u.last_seen || 0)) < 60000;
+            const isAdmin = u.role === 'admin';
+            const isMe = u.id === myUser.id;
+            
+            userTable.innerHTML += `<tr><td><div class="status-dot ${isOnline ? 'online' : ''}"></div><b>${u.username}</b> ${isAdmin ? '<span class="badge">ADMIN</span>' : ''} ${isMe ? '(You)' : ''}<span class="uid-label">${u.id}</span></td>
+                <td style="text-align:right">
+                <button class="btn-action" onclick="renameMember('${u.id}', '${u.username}')">Rename</button>
+                ${!isMe ? `<button class="btn-kick" onclick="kickUser('${u.id}', '${u.username}')">Kick</button>` : ''}
+                ${!isAdmin ? `<button class="btn-warning" onclick="makeAdmin('${u.id}')">Promote</button>` : ''}
+                ${!isMe ? `<button class="btn-danger" onclick="banUser('${u.id}', '${u.username}')">Ban</button>` : ''}</td></tr>`;
+        }
     });
-
-    const ml = document.getElementById("messageList");
-    ml.innerHTML = "";
-    msgs?.forEach(m => {
-        ml.innerHTML += `<div style="padding:5px; border-bottom:1px solid #333; font-size:0.8rem;">${m.name}: ${m.msg} <button onclick="pin('${m.id}','${m.msg.replace(/'/g,"")}')">Pin</button></div>`;
-    });
-
-    const mVal = sett.find(s => s.key === 'maintenance')?.value?.enabled;
-    document.getElementById("maintBtn").innerText = mVal ? "Disable Maintenance" : "Enable Maintenance";
-    document.getElementById("active-pin").innerText = sett.find(s => s.key === 'pin')?.value?.msg || "None";
 }
 
-window.updateRole = async (id, role) => await supabase.from('allowed_users').update({ role }).eq('id', id);
-window.kick = async (id) => confirm("Kick?") && await supabase.from('allowed_users').delete().eq('id', id);
-window.rename = async (id) => { const n = prompt("New Name:"); if(n) await supabase.from('allowed_users').update({ username: n }).eq('id', id); };
+async function loadMessages() {
+    const { data } = await supabase.from('messages').select('*').neq('type', 'announcement').order('time', { ascending: false }).limit(15);
+    const list = document.getElementById("messageList");
+    list.innerHTML = "";
+    data?.forEach(m => {
+        list.innerHTML += `<div class="msg-preview-item">
+            <b>${m.name}:</b> ${m.msg} <br>
+            <button class="btn-action" onclick="pinMsg('${m.id}', '${m.msg.replace(/'/g, "\\'")}')">Pin Message</button>
+        </div>`;
+    });
+}
+
+// --- GLOBAL ACTIONS ---
+
 window.toggleMaint = async () => {
     const { data } = await supabase.from('system_settings').select('value').eq('key', 'maintenance').single();
-    await supabase.from('system_settings').update({ value: { enabled: !data.value.enabled } }).eq('key', 'maintenance');
-};
-window.pin = async (id, msg) => await supabase.from('system_settings').update({ value: { id, msg } }).eq('key', 'pin');
-window.unpin = async () => await supabase.from('system_settings').update({ value: { id: "", msg: "" } }).eq('key', 'pin');
-window.sendAnn = async () => {
-    const v = document.getElementById("ann-msg").value;
-    await supabase.from('messages').insert([{ msg: v, name: "SYSTEM", type: "announcement", time: new Date().toISOString() }]);
+    const currentStatus = data.value.enabled;
+    await supabase.from('system_settings').update({ value: { enabled: !currentStatus } }).eq('key', 'maintenance');
 };
 
-init();
+window.approve = async (id, name) => {
+    await supabase.from('allowed_users').update({ role: 'user' }).eq('id', id);
+    loadMembers();
+};
+
+window.decline = async (id) => {
+    await supabase.from('allowed_users').update({ role: 'declined' }).eq('id', id);
+    loadMembers();
+};
+
+window.pinMsg = async (id, text) => {
+    await supabase.from('system_settings').update({ value: { id: id, msg: text } }).eq('key', 'pin');
+};
+
+window.unpinMessage = async () => {
+    await supabase.from('system_settings').update({ value: { id: "", msg: "" } }).eq('key', 'pin');
+};
+
+window.makeAdmin = async (id) => {
+    if(confirm("Promote to Admin?")) await supabase.from('allowed_users').update({ role: "admin" }).eq('id', id);
+};
+
+window.renameMember = async (id, old) => { 
+    const n = prompt("New name for " + old + ":");
+    if(n) await supabase.from('allowed_users').update({ username: n }).eq('id', id);
+};
+
+window.kickUser = async (id, name) => {
+    if(confirm("Kick " + name + "?")) await supabase.from('allowed_users').delete().eq('id', id);
+};
+
+window.banUser = async (id, name) => {
+    if(confirm("Ban " + name + " permanently?")) {
+        // In Supabase, usually you'd set a 'banned' role or delete.
+        await supabase.from('allowed_users').update({ role: 'banned' }).eq('id', id);
+    }
+};
+
+window.sendAnn = async () => {
+    const m = document.getElementById("ann-msg");
+    const val = m.value.trim();
+    if(!val) return;
+    // Announcement type allows chat.html to display it specially
+    await supabase.from('messages').insert([{ 
+        msg: val, 
+        name: "SYSTEM", 
+        type: "announcement", 
+        time: new Date().toISOString() 
+    }]);
+    m.value = "";
+    alert("Announcement Broadcasted!");
+};
+
+window.wipeChat = async () => {
+    if(confirm("Permanently wipe ALL messages? This cannot be undone.")) {
+        const { error } = await supabase.from('messages').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+        if(!error) alert("Chat wiped successfully.");
+        else console.error(error);
+        loadMessages();
+    }
+};
+
+checkAuth();
 </script>
 </body>
 </html>
