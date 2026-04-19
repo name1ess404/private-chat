@@ -154,7 +154,7 @@ async function init() {
         document.getElementById("display-name").innerText = myUsername;
         loadMessages();
         setupRealtime();
-        setInterval(heartbeat, 30000); heartbeat();
+        setInterval(heartbeat, 20000); heartbeat();
     }
 }
 
@@ -164,7 +164,7 @@ async function loadMessages() {
 }
 
 function setupRealtime() {
-    supabase.channel('public:messages')
+    supabase.channel('room1')
     .on('postgres_changes', { event: '*', schema: 'public', table: 'messages' }, payload => {
         if (payload.eventType === 'INSERT') {
             appendMsg(payload.new);
@@ -172,9 +172,9 @@ function setupRealtime() {
         } else if (payload.eventType === 'UPDATE') {
             const el = document.getElementById(`msg-${payload.new.id}`);
             if(el) {
-                // FIXED: Direct target of the text span to avoid overwriting the whole line
-                const textSpan = el.querySelector('.msg-line span:last-child');
-                if (textSpan) textSpan.innerText = payload.new.msg;
+                // FIXED: We target the specific span with the message class
+                const contentSpan = el.querySelector('.msg-content');
+                if (contentSpan) contentSpan.innerText = payload.new.msg;
                 if(payload.new.edited && !el.querySelector('.edited-tag')) {
                     el.querySelector('.msg-line').insertAdjacentHTML('beforeend', `<span class="edited-tag">(edited)</span>`);
                 }
@@ -182,12 +182,12 @@ function setupRealtime() {
         } else if (payload.eventType === 'DELETE') {
             document.getElementById(`msg-${payload.old.id}`)?.remove();
         }
-    }).subscribe();
-
-    supabase.channel('public:allowed_users')
+    })
     .on('postgres_changes', { event: '*', schema: 'public', table: 'allowed_users' }, () => {
         updateMemberList();
-    }).subscribe();
+    })
+    .subscribe();
+    
     updateMemberList();
 }
 
@@ -200,8 +200,8 @@ async function updateMemberList() {
     const now = Date.now();
 
     data?.forEach(u => {
-        // FIXED: Added check for u.last_seen existence
-        if (u.last_seen && (now - parseInt(u.last_seen)) < 80000) {
+        // Online if active in last 60 seconds
+        if (u.last_seen && (now - parseInt(u.last_seen)) < 60000) {
             list.innerHTML += `<div class="member-item"><div class="status-dot"></div><span>${u.username}</span></div>`;
         }
         if (u.id !== myUser.id && u.is_typing) typers.push(u.username);
@@ -228,7 +228,11 @@ function appendMsg(m, isBulk = false) {
             ${isMe ? `<button onclick="deleteMsg('${m.id}')" style="color:var(--danger)">Delete</button>` : ''}
         </div>
         ${m.reply_to ? `<div class="reply-preview" onclick="scrollToMessage('${m.reply_to.id}')"><b>${m.reply_to.name}:</b> ${m.reply_to.msg}</div>` : ''}
-        <p class="msg-line"><span class="name">${m.name}<span class="timestamp">${timeStr}</span>:</span><span>${m.msg}</span>${m.edited ? '<span class="edited-tag">(edited)</span>' : ''}</p>
+        <p class="msg-line">
+            <span class="name">${m.name}<span class="timestamp">${timeStr}</span>:</span>
+            <span class="msg-content">${m.msg}</span>
+            ${m.edited ? '<span class="edited-tag">(edited)</span>' : ''}
+        </p>
     `;
     chat.appendChild(msgDiv);
     if (!isBulk) chat.scrollTop = chat.scrollHeight;
@@ -260,11 +264,7 @@ document.getElementById("sendBtn").onclick = async () => {
     if(!val || isCooldown || checkSpam()) return;
 
     if(editingId) {
-        // FIXED: Explicitly mapping 'msg' column to prevent accidental timestamp overwrite
-        await supabase.from('messages')
-            .update({ msg: val, edited: true })
-            .eq('id', editingId);
-        
+        await supabase.from('messages').update({ msg: val, edited: true }).eq('id', editingId);
         editingId = null; 
         document.getElementById("sendBtn").innerText = "Send Message";
     } else {
