@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Admin Dashboard</title>
+    <style>
+        :root { --bg: #0d1117; --card: #161b22; --text: #c9d1d9; --border: #30363d; --accent: #1f6feb; --danger: #da3633; --success: #238636; --warning: #d29922; }
+        * { box-sizing: border-box; }
+        body { background: var(--bg); color: var(--text); font-family: 'Inter', -apple-system, sans-serif; margin: 0; display: flex; height: 100vh; overflow: hidden; }
+        #sidebar { width: 60%; border-right: 1px solid var(--border); padding: 25px; overflow-y: auto; }
+        #tools { width: 40%; padding: 25px; background: #090c10; overflow-y: auto; }
+        .section { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 20px; margin-bottom: 25px; }
+        h3 { margin-top: 0; border-bottom: 1px solid var(--border); padding-bottom: 12px; font-size: 1.1rem; color: #f0f6fc; }
+        table { width: 100%; border-collapse: collapse; }
+        td { padding: 14px 8px; border-bottom: 1px solid var(--border); font-size: 0.9rem; }
+        .uid-label { font-family: monospace; font-size: 0.7rem; color: #8b949e; display: block; margin-top: 4px; }
+        .badge { font-size: 0.65rem; padding: 3px 7px; border-radius: 4px; background: var(--accent); color: white; margin-left: 8px; font-weight: bold; }
+        .status-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #30363d; margin-right: 8px; }
+        .status-dot.online { background: var(--success); box-shadow: 0 0 6px var(--success); }
+        button { border: none; padding: 8px 14px; border-radius: 6px; cursor: pointer; font-weight: 700; font-size: 0.75rem; margin: 2px; transition: opacity 0.2s; }
+        button:hover { opacity: 0.8; }
+        .btn-success { background: var(--success); color: white; }
+        .btn-danger { background: var(--danger); color: white; }
+        .btn-warning { background: var(--warning); color: white; }
+        .btn-action { background: #30363d; color: white; }
+        .btn-kick { background: #f85149; color: white; }
+        textarea { width: 100%; background: #000; color: #fff; border: 1px solid var(--border); padding: 12px; border-radius: 6px; resize: none; font-family: inherit; font-size: 0.9rem; }
+        #status-overlay { position: fixed; inset: 0; background: var(--bg); display: flex; justify-content: center; align-items: center; z-index: 100; font-weight: bold; font-size: 1.2rem; }
+        .msg-preview-item { padding: 10px; border-bottom: 1px solid var(--border); font-size: 0.85rem; }
+        .msg-preview-item:hover { background: rgba(255,255,255,0.05); }
+    </style>
+</head>
+<body>
+
+<div id="status-overlay">AUTHORIZING...</div>
+
+<div id="sidebar">
+    <div class="section"><h3>Pending Requests</h3><table><tbody id="requestTable"></tbody></table></div>
+    <div class="section"><h3>Network Members</h3><table><tbody id="userTable"></tbody></table></div>
+    <div class="section">
+        <h3>Recent Messages (Pin Tool)</h3>
+        <div id="messageList" style="max-height: 300px; overflow-y: auto;"></div>
+    </div>
+</div>
+
+<div id="tools">
+    <h3>System Controls</h3>
+    <div class="section">
+        <p style="font-size:0.85rem; opacity:0.7; margin-bottom: 10px;">Maintenance Mode</p>
+        <button id="maintBtn" style="width:100%; padding:12px;" onclick="toggleMaint()">Loading Status...</button>
+    </div>
+    <div class="section">
+        <p style="font-size:0.85rem; opacity:0.7; margin-bottom: 10px;">Pinned Message</p>
+        <div id="active-pin" style="font-size: 0.8rem; margin-bottom: 10px; color: var(--warning);">None</div>
+        <button class="btn-danger" style="width:100%;" onclick="unpinMessage()">Remove Pin</button>
+    </div>
+    <div class="section">
+        <p style="font-size:0.85rem; opacity:0.7; margin-bottom: 10px;">Global Announcement</p>
+        <textarea id="ann-msg" rows="3" placeholder="Type message..."></textarea>
+        <button class="btn-success" style="width:100%; margin-top:10px; padding: 10px;" onclick="sendAnn()">Broadcast Message</button>
+    </div>
+    <button class="btn-danger" style="width:100%; padding:12px; opacity:0.6;" onclick="wipeChat()">Wipe Chat History (Safe)</button>
+</div>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
+import { getFirestore, collection, onSnapshot, doc, setDoc, deleteDoc, getDoc, updateDoc, getDocs, addDoc, query, orderBy, limit, serverTimestamp, writeBatch } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+
+const firebaseConfig = {
+    apiKey: "AIzaSyBH-2WaYipmAToWO35oMLQKTAuBGv_uDvA",
+    authDomain: "chat-web-first.firebaseapp.com",
+    projectId: "chat-web-first",
+    storageBucket: "chat-web-first.firebasestorage.app",
+    messagingSenderId: "267115702312",
+    appId: "1:267115702312:web:e09e72aee809ee954bad1d"
+};
+
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+
+// Global listeners to prevent memory leaks
+let activeListeners = [];
+
+onAuthStateChanged(auth, async (user) => {
+    if (!user) { await signInAnonymously(auth); return; }
+    const adminDoc = await getDoc(doc(db, "allowedUsers", user.uid));
+    if (adminDoc.exists() && adminDoc.data().role === "admin") {
+        document.getElementById("status-overlay").style.display = "none";
+        loadData(user.uid);
+    } else { document.body.innerHTML = "<h1 style='text-align:center; padding-top:50px; color:white;'>UNAUTHORIZED ACCESS</h1>"; }
+});
+
+function loadData(myUid) {
+    // Clear old listeners if any
+    activeListeners.forEach(unsub => unsub());
+
+    activeListeners.push(onSnapshot(doc(db, "system", "settings"), (snap) => {
+        if(snap.exists()) {
+            const isMaint = snap.data().maintenance;
+            const btn = document.getElementById("maintBtn");
+            btn.innerText = isMaint ? "DISABLE MAINTENANCE" : "ENABLE MAINTENANCE";
+            btn.className = isMaint ? "btn-success" : "btn-warning";
+        }
+    }));
+
+    activeListeners.push(onSnapshot(doc(db, "system", "pin"), (snap) => {
+        const pinDiv = document.getElementById("active-pin");
+        if(snap.exists()) pinDiv.innerText = "Current: " + snap.data().msg;
+        else pinDiv.innerText = "None";
+    }));
+
+    activeListeners.push(onSnapshot(collection(db, "requests"), (snap) => {
+        const table = document.getElementById("requestTable");
+        table.innerHTML = "";
+        snap.forEach(d => {
+            if(d.data().status === "declined") return;
+            table.innerHTML += `<tr><td><b>${d.data().name}</b><span class="uid-label">${d.id}</span></td>
+                <td style="text-align:right"><button class="btn-success" onclick="approve('${d.id}', '${d.data().name}')">Allow</button>
+                <button class="btn-danger" onclick="decline('${d.id}')">Deny</button></td></tr>`;
+        });
+    }));
+
+    activeListeners.push(onSnapshot(collection(db, "allowedUsers"), (snap) => {
+        const table = document.getElementById("userTable");
+        table.innerHTML = "";
+        snap.forEach(d => {
+            const data = d.data();
+            const isAdmin = data.role === 'admin';
+            const isMe = d.id === myUid;
+            const isOnline = (Date.now() - (data.lastSeen || 0)) < 60000;
+            table.innerHTML += `<tr><td><div class="status-dot ${isOnline ? 'online' : ''}"></div><b>${data.username}</b> ${isAdmin ? '<span class="badge">ADMIN</span>' : ''} ${isMe ? '(You)' : ''}<span class="uid-label">${d.id}</span></td>
+                <td style="text-align:right">
+                <button class="btn-action" onclick="renameMember('${d.id}', '${data.username}')">Rename</button>
+                ${!isMe ? `<button class="btn-kick" onclick="kickUser('${d.id}', '${data.username}')">Kick</button>` : ''}
+                ${!isAdmin ? `<button class="btn-warning" onclick="makeAdmin('${d.id}')">Promote</button>` : ''}
+                ${!isMe ? `<button class="btn-danger" onclick="banUser('${d.id}', '${data.username}')">Ban</button>` : ''}</td></tr>`;
+        });
+    }));
+
+    const q = query(collection(db, "messages"), orderBy("time", "desc"), limit(15));
+    activeListeners.push(onSnapshot(q, (snap) => {
+        const list = document.getElementById("messageList");
+        list.innerHTML = "";
+        snap.forEach(d => {
+            const m = d.data();
+            if(m.type === "announcement") return;
+            list.innerHTML += `<div class="msg-preview-item">
+                <b>${m.name}:</b> ${m.msg} <br>
+                <button class="btn-action" onclick="pinMsg('${d.id}', '${m.msg.replace(/'/g, "\\'")}')">Pin Message</button>
+            </div>`;
+        });
+    }));
+}
+
+// --- GLOBALS ---
+window.toggleMaint = async () => {
+    const ref = doc(db, "system", "settings");
+    const snap = await getDoc(ref);
+    let currentStatus = snap.exists() ? snap.data().maintenance : false;
+    await setDoc(ref, { maintenance: !currentStatus }, { merge: true });
+};
+
+window.approve = async (id, name) => {
+    await setDoc(doc(db, "allowedUsers", id), { username: name, role: "user", isTyping: false, lastSeen: Date.now() }, { merge: true });
+    await deleteDoc(doc(db, "requests", id));
+};
+
+window.pinMsg = async (id, text) => {
+    await setDoc(doc(db, "system", "pin"), { id: id, msg: text });
+};
+
+window.unpinMessage = async () => {
+    await deleteDoc(doc(db, "system", "pin"));
+};
+
+window.decline = async (id) => await updateDoc(doc(db, "requests", id), { status: "declined" });
+window.makeAdmin = async (id) => { if(confirm("Promote to Admin?")) await updateDoc(doc(db, "allowedUsers", id), { role: "admin" }); };
+window.renameMember = async (id, old) => { 
+    const n = prompt("New name for " + old + ":");
+    if(n) await updateDoc(doc(db, "allowedUsers", id), { username: n });
+};
+
+window.kickUser = async (id, name) => {
+    if(confirm("Kick " + name + "?")) await deleteDoc(doc(db, "allowedUsers", id));
+};
+
+window.banUser = async (id, name) => {
+    if(confirm("Ban " + name + " permanently?")) {
+        await setDoc(doc(db, "bannedUsers", id), { name: name, bannedAt: serverTimestamp() });
+        await deleteDoc(doc(db, "allowedUsers", id));
+    }
+};
+
+window.sendAnn = async () => {
+    const m = document.getElementById("ann-msg");
+    if(!m.value.trim()) return;
+    await addDoc(collection(db, "messages"), { msg: m.value, type: "announcement", time: serverTimestamp() });
+    m.value = "";
+};
+
+// SAFE WIPE: Uses Firestore Batches to prevent quota crashes
+window.wipeChat = async () => {
+    if(confirm("Permanently wipe ALL messages? This cannot be undone.")) {
+        const snap = await getDocs(collection(db, "messages"));
+        if (snap.size === 0) return alert("No messages to delete.");
+        
+        const batch = writeBatch(db);
+        snap.forEach(d => batch.delete(d.ref));
+        await batch.commit();
+        alert("Chat wiped successfully.");
+    }
+};
+</script>
+</body>
+</html>
