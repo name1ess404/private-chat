@@ -158,39 +158,51 @@ const checkSpam = () => {
 };
 
 async function init() {
-    // 1. Check current session
-    let { data: { session } } = await supabase.auth.getSession();
-    
-    // 2. If no session, sign in anonymously (ONLY ONCE)
-    if (!session) {
-        const { data, error } = await supabase.auth.signInAnonymously();
-        if (data) session = data.session;
-    }
-    
-    if (!session) {
-        document.getElementById("status").innerText = "Auth Failed. Check Internet.";
-        return;
-    }
-
-    myUser = session.user;
-    
-    // 3. Check profile
-    const { data: profile } = await supabase.from('allowed_users').select('*').eq('id', myUser.id).single();
-    
-    document.getElementById("status").style.display = "none";
-    if (!profile) {
-        document.getElementById("app").style.display = "none";
-        document.getElementById("request-screen").style.display = "flex";
-        document.getElementById("my-id-display").innerText = myUser.id;
-    } else {
-        myUsername = profile.username;
-        document.getElementById("request-screen").style.display = "none";
-        document.getElementById("app").style.display = "flex";
-        document.getElementById("display-name").innerText = myUsername;
+    try {
+        // 1. Check current session
+        let { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+        let session = sessionData?.session;
         
-        loadInitialData();
-        setupRealtime();
-        setupHeartbeat();
+        // 2. If no session, sign in anonymously
+        if (!session) {
+            const { data, error } = await supabase.auth.signInAnonymously();
+            if (error) throw error;
+            session = data.session;
+        }
+        
+        if (!session) {
+            document.getElementById("status").innerText = "Auth Failed. Check Internet.";
+            return;
+        }
+
+        myUser = session.user;
+        
+        // 3. Check profile
+        const { data: profile, error: profileError } = await supabase
+            .from('allowed_users')
+            .select('*')
+            .eq('id', myUser.id)
+            .maybeSingle(); // maybeSingle is safer for new users
+        
+        document.getElementById("status").style.display = "none";
+        
+        if (!profile) {
+            document.getElementById("app").style.display = "none";
+            document.getElementById("request-screen").style.display = "flex";
+            document.getElementById("my-id-display").innerText = myUser.id;
+        } else {
+            myUsername = profile.username;
+            document.getElementById("request-screen").style.display = "none";
+            document.getElementById("app").style.display = "flex";
+            document.getElementById("display-name").innerText = myUsername;
+            
+            loadInitialData();
+            setupRealtime();
+            setupHeartbeat();
+        }
+    } catch (err) {
+        console.error(err);
+        document.getElementById("status").innerText = "Connection Error: " + err.message;
     }
 }
 
