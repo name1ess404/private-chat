@@ -61,16 +61,12 @@
         .footer-credits { font-size: 0.65rem; opacity: 0.4; letter-spacing: 3px; margin-top: 10px; text-transform: uppercase; font-weight: 700; }
         #maint-overlay { display: none; text-align: center; padding: 15px; color: var(--warning); font-weight: 600; background: rgba(210, 153, 34, 0.1); border-radius: 8px; border: 1px dashed var(--warning); }
 
-        .seen-by-row {
-            display: flex; align-items: center; gap: 5px; margin-top: 3px; font-size: 0.68rem; color: #8b949e; flex-wrap: wrap; position: relative;
-        }
+        .seen-by-row { display: flex; align-items: center; gap: 5px; margin-top: 3px; font-size: 0.68rem; color: #8b949e; flex-wrap: wrap; position: relative; }
         .my-msg .seen-by-row { justify-content: flex-end; }
         .other-msg .seen-by-row { justify-content: flex-start; }
         .seen-eye-icon { opacity: 0.55; font-size: 0.75rem; cursor: pointer; user-select: none; flex-shrink: 0; }
         .seen-count { cursor: pointer; user-select: none; }
-        .seen-tooltip {
-            display: none; position: absolute; bottom: calc(100% + 4px); background: #21262d; border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px; font-size: 0.72rem; color: #c9d1d9; z-index: 20; box-shadow: 0 4px 12px rgba(0,0,0,0.5); max-width: 200px; white-space: normal; line-height: 1.5; pointer-events: none;
-        }
+        .seen-tooltip { display: none; position: absolute; bottom: calc(100% + 4px); background: #21262d; border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px; font-size: 0.72rem; color: #c9d1d9; z-index: 20; box-shadow: 0 4px 12px rgba(0,0,0,0.5); max-width: 200px; white-space: normal; line-height: 1.5; pointer-events: none; }
         .seen-by-row:hover .seen-tooltip, .seen-by-row.tooltip-visible .seen-tooltip { display: block; }
     </style>
 </head>
@@ -119,7 +115,7 @@
             <textarea id="msg" placeholder="Type a message..." rows="2"></textarea>
             <div id="cooldown-txt">Too fast! Wait 5s.</div>
             <div class="controls">
-                <button class="btn-outline" id="nameBtn" style="background:transparent; border:1px solid var(--border); color:var(--text); padding: 10px 18px; border-radius: 6px; cursor:pointer;">Nickname</button>
+                <button id="nameBtn" style="background:transparent; border:1px solid var(--border); color:var(--text); padding: 10px 18px; border-radius: 6px; cursor:pointer;">Nickname</button>
                 <button id="sendBtn" style="background:var(--accent); color:white; border:none; padding: 10px 18px; border-radius: 6px; cursor:pointer; font-weight:600;">Send Message</button>
             </div>
         </div>
@@ -130,32 +126,18 @@
 <div class="footer-credits">DEVELOPED BY NAMELESS</div>
 
 <script type="module">
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
-import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
-import { getFirestore, collection, addDoc, onSnapshot, orderBy, query, limit, doc, setDoc, updateDoc, deleteDoc, getDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm'
 
-const firebaseConfig = {
-    apiKey: "AIzaSyBH-2WaYipmAToWO35oMLQKTAuBGv_uDvA",
-    authDomain: "chat-web-first.firebaseapp.com",
-    projectId: "chat-web-first",
-    storageBucket: "chat-web-first.firebasestorage.app",
-    messagingSenderId: "267115702312",
-    appId: "1:267115702312:web:e09e72aee809ee954bad1d"
-};
-
-const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
-const db = getFirestore(app);
+const SUPABASE_URL = "https://pgdytywttdrqakczrprg.supabase.co";
+const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBnZHl0eXd0dGRycWFrY3pycHJnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY1MzMzMjYsImV4cCI6MjA5MjEwOTMyNn0.Owa5xlrvrw0p0lJ1AEqIxnudvTyxSSjKqZgX48j2KQA";
+const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
 let currentReply = null;
 let editingId = null;
 let lastMsgTime = 0;
 let isCooldown = false;
 let myUsername = "";
-
-// LEAK PREVENTION: Track and clean up listeners
-let seenObserver = null;
-const seenListeners = {}; 
+let myUser = null;
 
 window.toggleDrawer = () => document.getElementById('member-drawer').classList.toggle('open');
 
@@ -182,167 +164,131 @@ const checkSpam = () => {
     return false;
 };
 
-async function markAsSeen(msgId, uid, username) {
-    if(!msgId || !uid) return;
-    try {
-        const seenRef = doc(db, "messages", msgId, "seenBy", uid);
-        await setDoc(seenRef, { name: username, seenAt: Date.now() }, { merge: true });
-    } catch(e) { }
-}
-
-function setupSeenObserver(uid, username) {
-    if (seenObserver) seenObserver.disconnect();
-    seenObserver = new IntersectionObserver((entries) => {
-        entries.forEach(entry => {
-            if (entry.isIntersecting) {
-                const msgId = entry.target.dataset.msgId;
-                if (msgId) {
-                    markAsSeen(msgId, uid, username);
-                    seenObserver.unobserve(entry.target);
-                }
-            }
-        });
-    }, { threshold: 0.6 });
-    document.querySelectorAll('.msg-container[data-msg-id]').forEach(el => seenObserver.observe(el));
-}
-
-function subscribeToSeenBy(msgId) {
-    if (seenListeners[msgId]) return; // Already listening, don't duplicate
-
-    const seenRef = collection(db, "messages", msgId, "seenBy");
-    seenListeners[msgId] = onSnapshot(seenRef, (snap) => {
-        const seenEl = document.getElementById(`seen-${msgId}`);
-        if (!seenEl) return;
-
-        const viewers = [];
-        snap.forEach(d => viewers.push(d.data().name));
-
-        const tooltip = seenEl.querySelector('.seen-tooltip');
-        const countEl = seenEl.querySelector('.seen-count');
-
-        if (viewers.length === 0) {
-            seenEl.style.display = 'none';
-        } else {
-            seenEl.style.display = 'flex';
-            countEl.textContent = `${viewers.length} seen`;
-            tooltip.textContent = viewers.join(', ');
-        }
-    });
-}
-
-onAuthStateChanged(auth, async (user) => {
-    if (!user) { await signInAnonymously(auth); return; }
-
-    // System Status Listeners
-    onSnapshot(doc(db, "system", "pin"), (snap) => {
-        const pin = snap.data();
-        const container = document.getElementById("pinned-container");
-        if(pin && pin.msg) {
-            container.style.display = "flex";
-            document.getElementById("pinned-text").innerText = pin.msg.substring(0, 40) + "...";
-            container.dataset.targetId = pin.id;
-        } else { container.style.display = "none"; }
-    });
-
-    onSnapshot(doc(db, "system", "settings"), (snap) => {
-        const isMaint = snap.exists() ? snap.data().maintenance : false;
-        document.getElementById("input-fields").style.display = isMaint ? "none" : "block";
-        document.getElementById("maint-overlay").style.display = isMaint ? "block" : "none";
-    });
-
-    // Heartbeat
-    const hb = () => updateDoc(doc(db, "allowedUsers", user.uid), { lastSeen: Date.now() }).catch(()=>{});
-    setInterval(hb, 20000); hb();
-
-    // User Access Check
-    onSnapshot(doc(db, "allowedUsers", user.uid), (uDoc) => {
-        document.getElementById("status").style.display = "none";
-        if (!uDoc.exists()) {
-            document.getElementById("app").style.display = "none";
-            document.getElementById("request-screen").style.display = "flex";
-            document.getElementById("my-id-display").innerText = user.uid;
-        } else {
-            myUsername = uDoc.data().username;
-            document.getElementById("request-screen").style.display = "none";
-            document.getElementById("app").style.display = "flex";
-            document.getElementById("display-name").innerText = myUsername;
-        }
-    });
-
-    // Active Members & Typing
-    onSnapshot(collection(db, "allowedUsers"), (snap) => {
-        const list = document.getElementById("active-list");
-        const typingEl = document.getElementById("typing-indicator");
-        list.innerHTML = ""; let typers = [];
-        snap.forEach(d => {
-            const data = d.data();
-            if ((Date.now() - (data.lastSeen || 0)) < 45000) {
-                list.innerHTML += `<div class="member-item"><div class="status-dot"></div><span>${data.username}</span></div>`;
-            }
-            if(d.id !== user.uid && data.isTyping) typers.push(data.username);
-        });
-        typingEl.innerText = typers.length > 0 ? typers.join(", ") + " typing..." : "";
-    });
-
-    // LEAK FIXED: Added limit(40) to prevent 424k reads
-    const q = query(collection(db, "messages"), orderBy("time", "asc"), limit(40));
-    onSnapshot(q, (snap) => {
-        const chat = document.getElementById("chat");
-        const isInitial = chat.children.length === 0;
+// --- AUTH & INIT ---
+async function init() {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+        await supabase.auth.signInAnonymously();
+        location.reload();
+        return;
+    }
+    myUser = user;
+    
+    // Check Allowed status
+    const { data: profile } = await supabase.from('allowed_users').select('*').eq('id', user.id).single();
+    
+    document.getElementById("status").style.display = "none";
+    if (!profile) {
+        document.getElementById("app").style.display = "none";
+        document.getElementById("request-screen").style.display = "flex";
+        document.getElementById("my-id-display").innerText = user.id;
+    } else {
+        myUsername = profile.username;
+        document.getElementById("request-screen").style.display = "none";
+        document.getElementById("app").style.display = "flex";
+        document.getElementById("display-name").innerText = myUsername;
         
-        // Clear active message containers from UI but keep track of IDs
-        chat.innerHTML = "";
-        const msgIds = [];
+        loadInitialData();
+        setupRealtime();
+        setupHeartbeat();
+    }
+}
 
-        snap.forEach(d => {
-            const m = d.data();
-            const isMe = m.uid === user.uid;
-            const alignmentClass = isMe ? 'my-msg' : 'other-msg';
-            
-            let timeStr = "...";
-            if(m.time) {
-                const dateObj = m.time.toDate ? m.time.toDate() : new Date(m.time);
-                timeStr = dateObj.toLocaleTimeString('en-US', { timeZone: 'Asia/Dhaka', hour: '2-digit', minute: '2-digit', hour12: true });
+async function loadInitialData() {
+    // Load Settings
+    const { data: settings } = await supabase.from('system_settings').select('*');
+    const maint = settings?.find(s => s.id === 'maintenance')?.value_bool;
+    document.getElementById("input-fields").style.display = maint ? "none" : "block";
+    document.getElementById("maint-overlay").style.display = maint ? "block" : "none";
+
+    // Load Messages
+    const { data: messages } = await supabase.from('messages').select('*').order('time', { ascending: true }).limit(40);
+    messages?.forEach(m => appendMsg(m, true));
+    const chat = document.getElementById("chat");
+    chat.scrollTop = chat.scrollHeight;
+}
+
+function setupRealtime() {
+    // Listen for Messages
+    supabase.channel('messages-all').on('postgres_changes', { event: '*', schema: 'public', table: 'messages' }, payload => {
+        if (payload.eventType === 'INSERT') {
+            appendMsg(payload.new);
+            if (document.hidden) document.getElementById("msg-sound").play();
+        } else if (payload.eventType === 'UPDATE') {
+            const el = document.querySelector(`#msg-${payload.new.id} .msg-line span:last-child`);
+            if (el) el.innerText = payload.new.msg;
+            if (payload.new.edited) {
+                const p = el.parentElement;
+                if (!p.querySelector('.edited-tag')) p.innerHTML += `<span class="edited-tag">(edited)</span>`;
             }
-            
-            if(m.type === "announcement") {
-                chat.innerHTML += `<div class="announcement">📢 ${m.msg}</div>`;
-            } else {
-                msgIds.push(d.id);
-                let replyHtml = m.replyTo ? `<div class="reply-preview" onclick="scrollToMessage('${m.replyTo.id}')"><b>${m.replyTo.name}:</b> ${m.replyTo.msg}</div>` : '';
-                let editTag = m.edited ? `<span class="edited-tag">(edited)</span>` : '';
+        } else if (payload.eventType === 'DELETE') {
+            document.getElementById(`msg-${payload.old.id}`)?.remove();
+        }
+    }).subscribe();
 
-                chat.innerHTML += `
-                    <div class="msg-container ${alignmentClass}" id="msg-${d.id}" data-msg-id="${d.id}">
-                        <div class="msg-actions">
-                            <button onclick="startReply('${d.id}', '${m.name}', '${m.msg.replace(/'/g, "\\'")}')">Reply</button>
-                            ${isMe ? `<button onclick="startEdit('${d.id}', '${m.msg.replace(/'/g, "\\'")}')">Edit</button>` : ''}
-                            ${isMe ? `<button onclick="deleteMsg('${d.id}')" style="color:var(--danger)">Delete</button>` : ''}
-                        </div>
-                        ${replyHtml}
-                        <p class="msg-line">
-                            <span class="name">${m.name}<span class="timestamp">${timeStr}</span>:</span>
-                            <span>${m.msg}</span>${editTag}
-                        </p>
-                        <div class="seen-by-row" id="seen-${d.id}" style="display:none;" onclick="this.classList.toggle('tooltip-visible')">
-                            <span class="seen-eye-icon">👁</span>
-                            <span class="seen-count"></span>
-                            <div class="seen-tooltip"></div>
-                        </div>
-                    </div>`;
-            }
-        });
+    // Listen for Online Status & Typing
+    supabase.channel('online-users').on('postgres_changes', { event: '*', schema: 'public', table: 'allowed_users' }, payload => {
+        updateMemberUI();
+    }).subscribe();
+}
 
-        if(!isInitial && document.hidden) document.getElementById("msg-sound").play();
-        chat.scrollTop = chat.scrollHeight;
-
-        if (myUsername) setupSeenObserver(user.uid, myUsername);
-        
-        // LEAK FIXED: Logic to ensure we don't start duplicate listeners
-        msgIds.forEach(id => subscribeToSeenBy(id));
+async function updateMemberUI() {
+    const { data: users } = await supabase.from('allowed_users').select('*');
+    const list = document.getElementById("active-list");
+    const typingEl = document.getElementById("typing-indicator");
+    list.innerHTML = ""; let typers = [];
+    
+    users?.forEach(u => {
+        if ((Date.now() - (u.last_seen || 0)) < 90000) {
+            list.innerHTML += `<div class="member-item"><div class="status-dot"></div><span>${u.username}</span></div>`;
+        }
+        if (u.id !== myUser.id && u.is_typing) typers.push(u.username);
     });
-});
+    typingEl.innerText = typers.length > 0 ? typers.join(", ") + " typing..." : "";
+}
 
+function setupHeartbeat() {
+    const hb = () => supabase.from('allowed_users').update({ last_seen: Date.now() }).eq('id', myUser.id);
+    setInterval(hb, 60000); hb();
+}
+
+function appendMsg(m, isBulk = false) {
+    const chat = document.getElementById("chat");
+    if (document.getElementById(`msg-${m.id}`)) return;
+
+    const isMe = m.uid === myUser.id;
+    const align = isMe ? 'my-msg' : 'other-msg';
+    
+    const dateObj = new Date(m.time);
+    const timeStr = dateObj.toLocaleTimeString('en-US', { timeZone: 'Asia/Dhaka', hour: '2-digit', minute: '2-digit', hour12: true });
+
+    if(m.type === "announcement") {
+        chat.innerHTML += `<div class="announcement">📢 ${m.msg}</div>`;
+    } else {
+        let replyHtml = m.reply_to ? `<div class="reply-preview" onclick="scrollToMessage('${m.reply_to.id}')"><b>${m.reply_to.name}:</b> ${m.reply_to.msg}</div>` : '';
+        let editTag = m.edited ? `<span class="edited-tag">(edited)</span>` : '';
+
+        const msgDiv = document.createElement('div');
+        msgDiv.className = `msg-container ${align}`;
+        msgDiv.id = `msg-${m.id}`;
+        msgDiv.innerHTML = `
+            <div class="msg-actions">
+                <button onclick="startReply('${m.id}', '${m.name}', '${m.msg.replace(/'/g, "\\'")}')">Reply</button>
+                ${isMe ? `<button onclick="startEdit('${m.id}', '${m.msg.replace(/'/g, "\\'")}')">Edit</button>` : ''}
+                ${isMe ? `<button onclick="deleteMsg('${m.id}')" style="color:var(--danger)">Delete</button>` : ''}
+            </div>
+            ${replyHtml}
+            <p class="msg-line">
+                <span class="name">${m.name}<span class="timestamp">${timeStr}</span>:</span>
+                <span>${m.msg}</span>${editTag}
+            </p>
+        `;
+        chat.appendChild(msgDiv);
+    }
+    if (!isBulk) chat.scrollTop = chat.scrollHeight;
+}
+
+// --- ACTIONS ---
 window.startReply = (id, name, msg) => {
     currentReply = { id, name, msg: msg.substring(0, 50) };
     document.getElementById("reply-box").style.display = "flex";
@@ -364,60 +310,55 @@ window.startEdit = (id, oldMsg) => {
 };
 
 window.deleteMsg = async (id) => {
-    if(confirm("Delete message?")) await deleteDoc(doc(db, "messages", id));
+    if(confirm("Delete message?")) await supabase.from('messages').delete().eq('id', id);
 };
 
 document.getElementById("sendBtn").onclick = async () => {
     const inp = document.getElementById("msg");
     const val = inp.value.trim();
-    if(!val || isCooldown) return;
-    if(checkSpam()) return;
+    if(!val || isCooldown || checkSpam()) return;
 
     if(editingId) {
-        await updateDoc(doc(db, "messages", editingId), { msg: val, edited: true });
+        await supabase.from('messages').update({ msg: val, edited: true }).eq('id', editingId);
         editingId = null;
         document.getElementById("sendBtn").innerText = "Send Message";
     } else {
-        const u = await getDoc(doc(db, "allowedUsers", auth.currentUser.uid));
-        const payload = { 
-            name: u.data().username, 
-            msg: val, 
-            time: serverTimestamp(), 
-            uid: auth.currentUser.uid,
-            replyTo: currentReply 
-        };
-        await addDoc(collection(db, "messages"), payload);
+        await supabase.from('messages').insert([{ 
+            uid: myUser.id, name: myUsername, msg: val, reply_to: currentReply 
+        }]);
     }
     inp.value = "";
     cancelReply();
-    await updateDoc(doc(db, "allowedUsers", auth.currentUser.uid), { isTyping: false });
+    await supabase.from('allowed_users').update({ is_typing: false }).eq('id', myUser.id);
 };
-
-document.getElementById("msg").addEventListener("keydown", (e) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-        e.preventDefault();
-        document.getElementById("sendBtn").click();
-    }
-});
 
 document.getElementById("nameBtn").onclick = async () => {
     const n = prompt("New Nickname:");
-    if(n) await updateDoc(doc(db, "allowedUsers", auth.currentUser.uid), { username: n });
+    if(n) {
+        await supabase.from('allowed_users').update({ username: n }).eq('id', myUser.id);
+        location.reload();
+    }
 };
 
 document.getElementById("reqBtn").onclick = async () => {
     const n = document.getElementById("req-name").value.trim();
     if(!n) return;
-    await setDoc(doc(db, "requests", auth.currentUser.uid), { name: n, status: "pending", time: serverTimestamp() });
-    document.getElementById("req-status").innerText = "⏳ Request Sent!";
+    await supabase.from('allowed_users').insert([{ id: myUser.id, username: n, role: 'pending' }]);
+    document.getElementById("req-status").innerText = "⏳ Request Sent! Tell Admin.";
 };
 
 let tto;
 document.getElementById("msg").oninput = () => {
-    updateDoc(doc(db, "allowedUsers", auth.currentUser.uid), { isTyping: true }).catch(()=>{});
+    supabase.from('allowed_users').update({ is_typing: true }).eq('id', myUser.id);
     clearTimeout(tto);
-    tto = setTimeout(() => updateDoc(doc(db, "allowedUsers", auth.currentUser.uid), { isTyping: false }).catch(()=>{}), 2000);
+    tto = setTimeout(() => supabase.from('allowed_users').update({ is_typing: false }).eq('id', myUser.id), 2000);
 };
+
+document.getElementById("msg").onkeydown = (e) => {
+    if(e.key === "Enter" && !e.shiftKey) { e.preventDefault(); document.getElementById("sendBtn").click(); }
+};
+
+init();
 </script>
 </body>
 </html>
