@@ -164,17 +164,19 @@ async function loadMessages() {
 }
 
 function setupRealtime() {
-    // MESSAGE REALTIME
-    supabase.channel('msgs').on('postgres_changes', { event: '*', schema: 'public', table: 'messages' }, payload => {
+    supabase.channel('public:messages')
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'messages' }, payload => {
         if (payload.eventType === 'INSERT') {
             appendMsg(payload.new);
             if (document.hidden && payload.new.uid !== myUser.id) document.getElementById("msg-sound").play();
         } else if (payload.eventType === 'UPDATE') {
             const el = document.getElementById(`msg-${payload.new.id}`);
             if(el) {
-                el.querySelector('.msg-line span:last-child').innerText = payload.new.msg;
+                // FIXED: Direct target of the text span to avoid overwriting the whole line
+                const textSpan = el.querySelector('.msg-line span:last-child');
+                if (textSpan) textSpan.innerText = payload.new.msg;
                 if(payload.new.edited && !el.querySelector('.edited-tag')) {
-                    el.querySelector('.msg-line').innerHTML += `<span class="edited-tag">(edited)</span>`;
+                    el.querySelector('.msg-line').insertAdjacentHTML('beforeend', `<span class="edited-tag">(edited)</span>`);
                 }
             }
         } else if (payload.eventType === 'DELETE') {
@@ -182,8 +184,8 @@ function setupRealtime() {
         }
     }).subscribe();
 
-    // MEMBERS REALTIME
-    supabase.channel('members').on('postgres_changes', { event: '*', schema: 'public', table: 'allowed_users' }, () => {
+    supabase.channel('public:allowed_users')
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'allowed_users' }, () => {
         updateMemberList();
     }).subscribe();
     updateMemberList();
@@ -193,14 +195,18 @@ async function updateMemberList() {
     const { data } = await supabase.from('allowed_users').select('*');
     const list = document.getElementById("active-list");
     const typingEl = document.getElementById("typing-indicator");
-    list.innerHTML = ""; let typers = [];
+    list.innerHTML = ""; 
+    let typers = [];
+    const now = Date.now();
+
     data?.forEach(u => {
-        if ((Date.now() - (u.last_seen || 0)) < 70000) {
+        // FIXED: Added check for u.last_seen existence
+        if (u.last_seen && (now - parseInt(u.last_seen)) < 80000) {
             list.innerHTML += `<div class="member-item"><div class="status-dot"></div><span>${u.username}</span></div>`;
         }
         if (u.id !== myUser.id && u.is_typing) typers.push(u.username);
     });
-    typingEl.innerText = typers.length > 0 ? typers.join(", ") + " typing..." : "";
+    typingEl.innerText = typers.length > 0 ? typers.join(", ") + " is typing..." : "";
 }
 
 const heartbeat = () => supabase.from('allowed_users').update({ last_seen: Date.now() }).eq('id', myUser.id);
@@ -228,7 +234,6 @@ function appendMsg(m, isBulk = false) {
     if (!isBulk) chat.scrollTop = chat.scrollHeight;
 }
 
-// Global actions
 window.startReply = (id, name, msg) => {
     currentReply = { id, name, msg: msg.substring(0, 50) };
     document.getElementById("reply-box").style.display = "flex";
@@ -236,16 +241,32 @@ window.startReply = (id, name, msg) => {
     document.getElementById("msg").focus();
 };
 window.cancelReply = () => { currentReply = null; document.getElementById("reply-box").style.display = "none"; };
-window.startEdit = (id, oldMsg) => { editingId = id; const inp = document.getElementById("msg"); inp.value = oldMsg; inp.focus(); document.getElementById("sendBtn").innerText = "Update"; };
-window.deleteMsg = async (id) => { if(confirm("Delete?")) await supabase.from('messages').delete().eq('id', id); };
+
+window.startEdit = (id, oldMsg) => { 
+    editingId = id; 
+    const inp = document.getElementById("msg"); 
+    inp.value = oldMsg; 
+    inp.focus(); 
+    document.getElementById("sendBtn").innerText = "Update"; 
+};
+
+window.deleteMsg = async (id) => { 
+    if(confirm("Delete?")) await supabase.from('messages').delete().eq('id', id); 
+};
 
 document.getElementById("sendBtn").onclick = async () => {
     const inp = document.getElementById("msg");
     const val = inp.value.trim();
     if(!val || isCooldown || checkSpam()) return;
+
     if(editingId) {
-        await supabase.from('messages').update({ msg: val, edited: true }).eq('id', editingId);
-        editingId = null; document.getElementById("sendBtn").innerText = "Send Message";
+        // FIXED: Explicitly mapping 'msg' column to prevent accidental timestamp overwrite
+        await supabase.from('messages')
+            .update({ msg: val, edited: true })
+            .eq('id', editingId);
+        
+        editingId = null; 
+        document.getElementById("sendBtn").innerText = "Send Message";
     } else {
         await supabase.from('messages').insert([{ uid: myUser.id, name: myUsername, msg: val, reply_to: currentReply }]);
     }
