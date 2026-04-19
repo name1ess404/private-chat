@@ -63,155 +63,190 @@
 </div>
 
 <script type="module">
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
-import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
-import { getFirestore, collection, onSnapshot, doc, setDoc, deleteDoc, getDoc, updateDoc, getDocs, addDoc, query, orderBy, limit, serverTimestamp, writeBatch } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm'
 
-const firebaseConfig = {
-    apiKey: "AIzaSyBH-2WaYipmAToWO35oMLQKTAuBGv_uDvA",
-    authDomain: "chat-web-first.firebaseapp.com",
-    projectId: "chat-web-first",
-    storageBucket: "chat-web-first.firebasestorage.app",
-    messagingSenderId: "267115702312",
-    appId: "1:267115702312:web:e09e72aee809ee954bad1d"
-};
+const SUPABASE_URL = "https://pgdytywttdrqakczrprg.supabase.co";
+const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBnZHl0eXd0dGRycWFrY3pycHJnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY1MzMzMjYsImV4cCI6MjA5MjEwOTMyNn0.Owa5xlrvrw0p0lJ1AEqIxnudvTyxSSjKqZgX48j2KQA";
+const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
-const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
-const db = getFirestore(app);
+let myUser = null;
 
-// Global listeners to prevent memory leaks
-let activeListeners = [];
+async function checkAuth() {
+    let { data: { session } } = await supabase.auth.getSession();
+    if (!session) {
+        const { data } = await supabase.auth.signInAnonymously();
+        session = data.session;
+    }
+    myUser = session.user;
 
-onAuthStateChanged(auth, async (user) => {
-    if (!user) { await signInAnonymously(auth); return; }
-    const adminDoc = await getDoc(doc(db, "allowedUsers", user.uid));
-    if (adminDoc.exists() && adminDoc.data().role === "admin") {
+    const { data: profile } = await supabase.from('allowed_users').select('*').eq('id', myUser.id).single();
+    
+    if (profile && profile.role === 'admin') {
         document.getElementById("status-overlay").style.display = "none";
-        loadData(user.uid);
-    } else { document.body.innerHTML = "<h1 style='text-align:center; padding-top:50px; color:white;'>UNAUTHORIZED ACCESS</h1>"; }
-});
-
-function loadData(myUid) {
-    // Clear old listeners if any
-    activeListeners.forEach(unsub => unsub());
-
-    activeListeners.push(onSnapshot(doc(db, "system", "settings"), (snap) => {
-        if(snap.exists()) {
-            const isMaint = snap.data().maintenance;
-            const btn = document.getElementById("maintBtn");
-            btn.innerText = isMaint ? "DISABLE MAINTENANCE" : "ENABLE MAINTENANCE";
-            btn.className = isMaint ? "btn-success" : "btn-warning";
-        }
-    }));
-
-    activeListeners.push(onSnapshot(doc(db, "system", "pin"), (snap) => {
-        const pinDiv = document.getElementById("active-pin");
-        if(snap.exists()) pinDiv.innerText = "Current: " + snap.data().msg;
-        else pinDiv.innerText = "None";
-    }));
-
-    activeListeners.push(onSnapshot(collection(db, "requests"), (snap) => {
-        const table = document.getElementById("requestTable");
-        table.innerHTML = "";
-        snap.forEach(d => {
-            if(d.data().status === "declined") return;
-            table.innerHTML += `<tr><td><b>${d.data().name}</b><span class="uid-label">${d.id}</span></td>
-                <td style="text-align:right"><button class="btn-success" onclick="approve('${d.id}', '${d.data().name}')">Allow</button>
-                <button class="btn-danger" onclick="decline('${d.id}')">Deny</button></td></tr>`;
-        });
-    }));
-
-    activeListeners.push(onSnapshot(collection(db, "allowedUsers"), (snap) => {
-        const table = document.getElementById("userTable");
-        table.innerHTML = "";
-        snap.forEach(d => {
-            const data = d.data();
-            const isAdmin = data.role === 'admin';
-            const isMe = d.id === myUid;
-            const isOnline = (Date.now() - (data.lastSeen || 0)) < 60000;
-            table.innerHTML += `<tr><td><div class="status-dot ${isOnline ? 'online' : ''}"></div><b>${data.username}</b> ${isAdmin ? '<span class="badge">ADMIN</span>' : ''} ${isMe ? '(You)' : ''}<span class="uid-label">${d.id}</span></td>
-                <td style="text-align:right">
-                <button class="btn-action" onclick="renameMember('${d.id}', '${data.username}')">Rename</button>
-                ${!isMe ? `<button class="btn-kick" onclick="kickUser('${d.id}', '${data.username}')">Kick</button>` : ''}
-                ${!isAdmin ? `<button class="btn-warning" onclick="makeAdmin('${d.id}')">Promote</button>` : ''}
-                ${!isMe ? `<button class="btn-danger" onclick="banUser('${d.id}', '${data.username}')">Ban</button>` : ''}</td></tr>`;
-        });
-    }));
-
-    const q = query(collection(db, "messages"), orderBy("time", "desc"), limit(15));
-    activeListeners.push(onSnapshot(q, (snap) => {
-        const list = document.getElementById("messageList");
-        list.innerHTML = "";
-        snap.forEach(d => {
-            const m = d.data();
-            if(m.type === "announcement") return;
-            list.innerHTML += `<div class="msg-preview-item">
-                <b>${m.name}:</b> ${m.msg} <br>
-                <button class="btn-action" onclick="pinMsg('${d.id}', '${m.msg.replace(/'/g, "\\'")}')">Pin Message</button>
-            </div>`;
-        });
-    }));
+        initDashboard();
+    } else {
+        document.body.innerHTML = "<h1 style='text-align:center; padding-top:50px; color:white;'>UNAUTHORIZED ACCESS</h1>";
+    }
 }
 
-// --- GLOBALS ---
+function initDashboard() {
+    setupRealtime();
+    loadMessages();
+}
+
+async function setupRealtime() {
+    // Listen for Settings changes (Maintenance & Pin)
+    supabase.channel('system_updates')
+        .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'system_settings' }, () => {
+            syncSystemUI();
+        })
+        .subscribe();
+
+    // Listen for User/Request changes
+    supabase.channel('user_updates')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'allowed_users' }, () => {
+            loadMembers();
+        })
+        .subscribe();
+
+    // Listen for New Messages (to update pin tool list)
+    supabase.channel('msg_updates')
+        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, () => {
+            loadMessages();
+        })
+        .subscribe();
+
+    // Initial Loads
+    syncSystemUI();
+    loadMembers();
+}
+
+async function syncSystemUI() {
+    const { data: settings } = await supabase.from('system_settings').select('*');
+    
+    // Maint UI
+    const maint = settings.find(s => s.key === 'maintenance')?.value?.enabled;
+    const btn = document.getElementById("maintBtn");
+    btn.innerText = maint ? "DISABLE MAINTENANCE" : "ENABLE MAINTENANCE";
+    btn.className = maint ? "btn-success" : "btn-warning";
+
+    // Pin UI
+    const pin = settings.find(s => s.key === 'pin')?.value;
+    const pinDiv = document.getElementById("active-pin");
+    pinDiv.innerText = (pin && pin.msg) ? "Current: " + pin.msg : "None";
+}
+
+async function loadMembers() {
+    const { data: users } = await supabase.from('allowed_users').select('*');
+    
+    const reqTable = document.getElementById("requestTable");
+    const userTable = document.getElementById("userTable");
+    reqTable.innerHTML = "";
+    userTable.innerHTML = "";
+
+    users?.forEach(u => {
+        if (u.role === 'pending') {
+            reqTable.innerHTML += `<tr><td><b>${u.username}</b><span class="uid-label">${u.id}</span></td>
+                <td style="text-align:right"><button class="btn-success" onclick="approve('${u.id}', '${u.username}')">Allow</button>
+                <button class="btn-danger" onclick="decline('${u.id}')">Deny</button></td></tr>`;
+        } else if (u.role !== 'declined') {
+            const isOnline = (Date.now() - (u.last_seen || 0)) < 60000;
+            const isAdmin = u.role === 'admin';
+            const isMe = u.id === myUser.id;
+            
+            userTable.innerHTML += `<tr><td><div class="status-dot ${isOnline ? 'online' : ''}"></div><b>${u.username}</b> ${isAdmin ? '<span class="badge">ADMIN</span>' : ''} ${isMe ? '(You)' : ''}<span class="uid-label">${u.id}</span></td>
+                <td style="text-align:right">
+                <button class="btn-action" onclick="renameMember('${u.id}', '${u.username}')">Rename</button>
+                ${!isMe ? `<button class="btn-kick" onclick="kickUser('${u.id}', '${u.username}')">Kick</button>` : ''}
+                ${!isAdmin ? `<button class="btn-warning" onclick="makeAdmin('${u.id}')">Promote</button>` : ''}
+                ${!isMe ? `<button class="btn-danger" onclick="banUser('${u.id}', '${u.username}')">Ban</button>` : ''}</td></tr>`;
+        }
+    });
+}
+
+async function loadMessages() {
+    const { data } = await supabase.from('messages').select('*').neq('type', 'announcement').order('time', { ascending: false }).limit(15);
+    const list = document.getElementById("messageList");
+    list.innerHTML = "";
+    data?.forEach(m => {
+        list.innerHTML += `<div class="msg-preview-item">
+            <b>${m.name}:</b> ${m.msg} <br>
+            <button class="btn-action" onclick="pinMsg('${m.id}', '${m.msg.replace(/'/g, "\\'")}')">Pin Message</button>
+        </div>`;
+    });
+}
+
+// --- GLOBAL ACTIONS ---
+
 window.toggleMaint = async () => {
-    const ref = doc(db, "system", "settings");
-    const snap = await getDoc(ref);
-    let currentStatus = snap.exists() ? snap.data().maintenance : false;
-    await setDoc(ref, { maintenance: !currentStatus }, { merge: true });
+    const { data } = await supabase.from('system_settings').select('value').eq('key', 'maintenance').single();
+    const currentStatus = data.value.enabled;
+    await supabase.from('system_settings').update({ value: { enabled: !currentStatus } }).eq('key', 'maintenance');
 };
 
 window.approve = async (id, name) => {
-    await setDoc(doc(db, "allowedUsers", id), { username: name, role: "user", isTyping: false, lastSeen: Date.now() }, { merge: true });
-    await deleteDoc(doc(db, "requests", id));
+    await supabase.from('allowed_users').update({ role: 'user' }).eq('id', id);
+    loadMembers();
+};
+
+window.decline = async (id) => {
+    await supabase.from('allowed_users').update({ role: 'declined' }).eq('id', id);
+    loadMembers();
 };
 
 window.pinMsg = async (id, text) => {
-    await setDoc(doc(db, "system", "pin"), { id: id, msg: text });
+    await supabase.from('system_settings').update({ value: { id: id, msg: text } }).eq('key', 'pin');
 };
 
 window.unpinMessage = async () => {
-    await deleteDoc(doc(db, "system", "pin"));
+    await supabase.from('system_settings').update({ value: { id: "", msg: "" } }).eq('key', 'pin');
 };
 
-window.decline = async (id) => await updateDoc(doc(db, "requests", id), { status: "declined" });
-window.makeAdmin = async (id) => { if(confirm("Promote to Admin?")) await updateDoc(doc(db, "allowedUsers", id), { role: "admin" }); };
+window.makeAdmin = async (id) => {
+    if(confirm("Promote to Admin?")) await supabase.from('allowed_users').update({ role: "admin" }).eq('id', id);
+};
+
 window.renameMember = async (id, old) => { 
     const n = prompt("New name for " + old + ":");
-    if(n) await updateDoc(doc(db, "allowedUsers", id), { username: n });
+    if(n) await supabase.from('allowed_users').update({ username: n }).eq('id', id);
 };
 
 window.kickUser = async (id, name) => {
-    if(confirm("Kick " + name + "?")) await deleteDoc(doc(db, "allowedUsers", id));
+    if(confirm("Kick " + name + "?")) await supabase.from('allowed_users').delete().eq('id', id);
 };
 
 window.banUser = async (id, name) => {
     if(confirm("Ban " + name + " permanently?")) {
-        await setDoc(doc(db, "bannedUsers", id), { name: name, bannedAt: serverTimestamp() });
-        await deleteDoc(doc(db, "allowedUsers", id));
+        // In Supabase, usually you'd set a 'banned' role or delete.
+        await supabase.from('allowed_users').update({ role: 'banned' }).eq('id', id);
     }
 };
 
 window.sendAnn = async () => {
     const m = document.getElementById("ann-msg");
-    if(!m.value.trim()) return;
-    await addDoc(collection(db, "messages"), { msg: m.value, type: "announcement", time: serverTimestamp() });
+    const val = m.value.trim();
+    if(!val) return;
+    // Announcement type allows chat.html to display it specially
+    await supabase.from('messages').insert([{ 
+        msg: val, 
+        name: "SYSTEM", 
+        type: "announcement", 
+        time: new Date().toISOString() 
+    }]);
     m.value = "";
+    alert("Announcement Broadcasted!");
 };
 
-// SAFE WIPE: Uses Firestore Batches to prevent quota crashes
 window.wipeChat = async () => {
     if(confirm("Permanently wipe ALL messages? This cannot be undone.")) {
-        const snap = await getDocs(collection(db, "messages"));
-        if (snap.size === 0) return alert("No messages to delete.");
-        
-        const batch = writeBatch(db);
-        snap.forEach(d => batch.delete(d.ref));
-        await batch.commit();
-        alert("Chat wiped successfully.");
+        const { error } = await supabase.from('messages').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+        if(!error) alert("Chat wiped successfully.");
+        else console.error(error);
+        loadMessages();
     }
 };
+
+checkAuth();
 </script>
 </body>
 </html>
