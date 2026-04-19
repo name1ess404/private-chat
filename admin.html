@@ -5,32 +5,29 @@
     <title>Admin Dashboard</title>
     <style>
         :root { --bg: #0d1117; --card: #161b22; --text: #c9d1d9; --border: #30363d; --accent: #1f6feb; --danger: #da3633; --success: #238636; --warning: #d29922; }
-        body { background: var(--bg); color: var(--text); font-family: 'Inter', sans-serif; margin: 0; display: flex; height: 100vh; }
-        #sidebar { width: 60%; border-right: 1px solid var(--border); padding: 25px; overflow-y: auto; }
-        #tools { width: 40%; padding: 25px; background: #090c10; overflow-y: auto; }
-        .section { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 20px; margin-bottom: 25px; }
-        table { width: 100%; border-collapse: collapse; }
-        td { padding: 12px 8px; border-bottom: 1px solid var(--border); }
-        .status-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #30363d; margin-right: 8px; }
-        .status-dot.online { background: var(--success); box-shadow: 0 0 6px var(--success); }
-        button { border: none; padding: 6px 12px; border-radius: 6px; cursor: pointer; font-weight: bold; font-size: 0.7rem; margin: 2px; }
+        body { background: var(--bg); color: var(--text); font-family: 'Inter', sans-serif; display: flex; height: 100vh; margin: 0; }
+        #sidebar { width: 60%; border-right: 1px solid var(--border); padding: 20px; overflow-y: auto; }
+        #tools { width: 40%; padding: 20px; background: #090c10; }
+        .section { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 15px; margin-bottom: 20px; }
+        button { border: none; padding: 6px 10px; border-radius: 4px; cursor: pointer; font-size: 0.75rem; font-weight: bold; margin: 2px; }
         .btn-success { background: var(--success); color: white; }
         .btn-danger { background: var(--danger); color: white; }
         .btn-warning { background: var(--warning); color: white; }
         .btn-promote { background: #8957e5; color: white; }
-        .msg-item { padding: 10px; border-bottom: 1px solid var(--border); font-size: 0.8rem; }
+        table { width: 100%; border-collapse: collapse; }
+        td { padding: 10px 5px; border-bottom: 1px solid var(--border); }
     </style>
 </head>
 <body>
 <div id="sidebar">
-    <div class="section"><h3>Requests</h3><table><tbody id="requestTable"></tbody></table></div>
-    <div class="section"><h3>Members</h3><table><tbody id="userTable"></tbody></table></div>
-    <div class="section"><h3>Live Messages (Pin Tool)</h3><div id="messageList"></div></div>
+    <div class="section"><h3>Member Requests</h3><table><tbody id="requestTable"></tbody></table></div>
+    <div class="section"><h3>Chat Members</h3><table><tbody id="userTable"></tbody></table></div>
+    <div class="section"><h3>Recent Messages (Pin)</h3><div id="messageList"></div></div>
 </div>
 <div id="tools">
-    <div class="section"><h3>Maintenance</h3><button id="maintBtn" style="width:100%" onclick="toggleMaint()">Loading...</button></div>
-    <div class="section"><h3>Pinned</h3><div id="active-pin" style="color:var(--warning); margin-bottom:10px;">None</div><button class="btn-danger" style="width:100%" onclick="unpin()">Remove Pin</button></div>
-    <div class="section"><h3>Broadcast</h3><textarea id="ann-msg" style="width:100%; background:#000; color:#fff; border:1px solid var(--border);"></textarea><button class="btn-success" style="width:100%; margin-top:10px;" onclick="sendAnn()">Send Announcement</button></div>
+    <div class="section"><h3>Settings</h3><button id="maintBtn" style="width:100%" onclick="toggleMaint()">...</button></div>
+    <div class="section"><h3>Pin</h3><div id="active-pin" style="color:var(--warning)">None</div><button class="btn-danger" style="width:100%; margin-top:10px;" onclick="unpin()">Unpin</button></div>
+    <div class="section"><h3>Announcement</h3><textarea id="ann-msg" style="width:100%; height:60px;"></textarea><button class="btn-success" style="width:100%; margin-top:10px;" onclick="sendAnn()">Send</button></div>
 </div>
 
 <script type="module">
@@ -41,52 +38,41 @@ let myId = null;
 
 async function init() {
     const { data: { session } } = await supabase.auth.getSession();
-    myId = session.user.id;
-    setupRealtime();
-    loadData();
+    myId = session?.user.id;
+    supabase.channel('admin_live').on('postgres_changes', { event: '*', schema: 'public' }, () => load()).subscribe();
+    load();
 }
 
-function setupRealtime() {
-    supabase.channel('admin_all').on('postgres_changes', { event: '*', schema: 'public' }, () => loadData()).subscribe();
-}
-
-async function loadData() {
+async function load() {
     const { data: users } = await supabase.from('allowed_users').select('*');
-    const { data: settings } = await supabase.from('system_settings').select('*');
     const { data: msgs } = await supabase.from('messages').select('*').order('time', { ascending: false }).limit(10);
+    const { data: sett } = await supabase.from('system_settings').select('*');
 
-    // Render Users
     const ut = document.getElementById("userTable");
     const rt = document.getElementById("requestTable");
-    ut.innerHTML = ""; rt.innerHTML = "";
-    
+    ut.innerHTML = rt.innerHTML = "";
+
     users?.forEach(u => {
-        const isOnline = (Date.now() - u.last_seen) < 30000;
-        const row = `<tr><td><span class="status-dot ${isOnline?'online':''}"></span>${u.username}</td><td style="text-align:right">
-            ${u.id === myId ? 
-                `<button class="btn-warning" onclick="rename('${u.id}')">Rename</button>` : 
-                (u.role === 'pending' ? 
-                    `<button class="btn-success" onclick="updateRole('${u.id}','user')">Allow</button>` :
-                    `<button class="btn-danger" onclick="kick('${u.id}')">Kick</button>
-                     <button class="btn-warning" onclick="rename('${u.id}')">Rename</button>
-                     <button class="btn-promote" onclick="updateRole('${u.id}','admin')">Promote</button>`)
-            }
+        const row = `<tr><td>${u.username}</td><td style="text-align:right">
+            <button class="btn-warning" onclick="rename('${u.id}')">Rename</button>
+            ${u.id !== myId ? `
+                <button class="btn-danger" onclick="kick('${u.id}')">Kick</button>
+                <button class="btn-promote" onclick="updateRole('${u.id}','admin')">Promote</button>
+            ` : ''}
+            ${u.role === 'pending' ? `<button class="btn-success" onclick="updateRole('${u.id}','user')">Allow</button>` : ''}
         </td></tr>`;
         if(u.role === 'pending') rt.innerHTML += row; else ut.innerHTML += row;
     });
 
-    // Render Messages for Pinning
     const ml = document.getElementById("messageList");
     ml.innerHTML = "";
-    msgs?.filter(m => m.type !== 'announcement').forEach(m => {
-        ml.innerHTML += `<div class="msg-item">${m.name}: ${m.msg} <button onclick="pin('${m.id}','${m.msg.replace(/'/g,"")}')">Pin</button></div>`;
+    msgs?.forEach(m => {
+        ml.innerHTML += `<div style="padding:5px; border-bottom:1px solid #333; font-size:0.8rem;">${m.name}: ${m.msg} <button onclick="pin('${m.id}','${m.msg.replace(/'/g,"")}')">Pin</button></div>`;
     });
 
-    // Sync Settings
-    const mVal = settings.find(s => s.key === 'maintenance')?.value?.enabled;
-    const pVal = settings.find(s => s.key === 'pin')?.value;
-    document.getElementById("maintBtn").innerText = mVal ? "DISABLE MAINT" : "ENABLE MAINT";
-    document.getElementById("active-pin").innerText = pVal?.msg || "None";
+    const mVal = sett.find(s => s.key === 'maintenance')?.value?.enabled;
+    document.getElementById("maintBtn").innerText = mVal ? "Disable Maintenance" : "Enable Maintenance";
+    document.getElementById("active-pin").innerText = sett.find(s => s.key === 'pin')?.value?.msg || "None";
 }
 
 window.updateRole = async (id, role) => await supabase.from('allowed_users').update({ role }).eq('id', id);
@@ -101,7 +87,6 @@ window.unpin = async () => await supabase.from('system_settings').update({ value
 window.sendAnn = async () => {
     const v = document.getElementById("ann-msg").value;
     await supabase.from('messages').insert([{ msg: v, name: "SYSTEM", type: "announcement", time: new Date().toISOString() }]);
-    document.getElementById("ann-msg").value = "";
 };
 
 init();
