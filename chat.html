@@ -111,7 +111,7 @@ let isCooldown = false;
 let myUsername = "";
 let myUser = null;
 
-// --- 1. UTILITY FUNCTIONS ---
+// --- UTILITIES ---
 window.toggleDrawer = () => document.getElementById('member-drawer').classList.toggle('open');
 window.scrollToMessage = (id) => {
     const el = document.getElementById(`msg-${id}`);
@@ -135,7 +135,7 @@ const checkSpam = () => {
     return false;
 };
 
-// --- 2. CORE CHAT FUNCTIONS (Defined before they are called) ---
+// --- CORE FUNCTIONS ---
 
 function appendMsg(m, isBulk = false) {
     if (document.getElementById(`msg-${m.id}`)) return;
@@ -165,8 +165,8 @@ function appendMsg(m, isBulk = false) {
 }
 
 const heartbeat = () => {
-    supabase.from('allowed_users').update({ last_seen: Date.now() }).eq('id', myUser.id)
-    .then(({error}) => { if(!error) console.log("Heartbeat Sent:", Date.now()); });
+    // Silent update - no console printing
+    supabase.from('allowed_users').update({ last_seen: Date.now() }).eq('id', myUser.id).then(() => {});
 };
 
 async function updateMemberList() {
@@ -179,16 +179,47 @@ async function updateMemberList() {
 
     data?.forEach(u => {
         const lastActive = Number(u.last_seen);
-        // FIXED LOGIC: Show as online if seen in last 60s OR if it's the current user
-        if ((lastActive && (now - lastActive) < 60000) || u.id === myUser.id) {
-            list.innerHTML += `<div class="member-item"><div class="status-dot"></div><span>${u.username} ${u.id === myUser.id ? '(You)' : ''}</span></div>`;
+        if (!lastActive) return;
+
+        const diffMs = now - lastActive;
+        const diffMins = Math.floor(diffMs / 60000);
+        
+        // Logic: 
+        // 1. If seen < 60s ago: Status "Active" (Green)
+        // 2. If 1m - 5m ago: Status "X min ago" (Gray)
+        // 3. If > 5m ago: Don't show at all
+        
+        if (diffMs < 60000 || u.id === myUser.id) {
+            // CURRENTLY ACTIVE
+            list.innerHTML += `
+                <div class="member-item">
+                    <div class="status-dot" style="background: var(--accent)"></div>
+                    <div style="display:flex; flex-direction:column;">
+                        <span>${u.username} ${u.id === myUser.id ? '(You)' : ''}</span>
+                        <small style="font-size:0.7rem; opacity:0.6;">Active</small>
+                    </div>
+                </div>`;
+        } else if (diffMins < 5) {
+            // AWAY (BUT WITHIN 5 MINUTES)
+            list.innerHTML += `
+                <div class="member-item">
+                    <div class="status-dot" style="background: #555"></div>
+                    <div style="display:flex; flex-direction:column;">
+                        <span>${u.username}</span>
+                        <small style="font-size:0.7rem; opacity:0.6;">${diffMins}m ago</small>
+                    </div>
+                </div>`;
         }
+
         if (u.id !== myUser.id && u.is_typing) typers.push(u.username);
     });
     typingEl.innerText = typers.length > 0 ? typers.join(", ") + " is typing..." : "";
 }
 
-// --- 3. SYSTEM INITIALIZATION ---
+// Update the list visually every 30 seconds even if no database change happens
+setInterval(updateMemberList, 30000);
+
+// --- SYSTEM ---
 
 async function loadMessages() {
     const { data } = await supabase.from('messages').select('*').order('time', { ascending: true }).limit(50);
@@ -240,7 +271,7 @@ async function init() {
     }
 }
 
-// --- 4. EVENT LISTENERS ---
+// --- EVENTS ---
 
 window.startReply = (id, name) => {
     const txt = document.querySelector(`#msg-${id} .msg-content`).innerText;
