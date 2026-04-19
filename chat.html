@@ -191,7 +191,14 @@ function setupRealtime() {
 }
 
 async function updateMemberList() {
-    const { data } = await supabase.from('allowed_users').select('*');
+    // 1. Fetch all users
+    const { data, error } = await supabase.from('allowed_users').select('*');
+    
+    if (error) {
+        console.error("Member Fetch Error:", error.message);
+        return;
+    }
+
     const list = document.getElementById("active-list");
     const typingEl = document.getElementById("typing-indicator");
     list.innerHTML = ""; 
@@ -199,12 +206,24 @@ async function updateMemberList() {
     const now = Date.now();
 
     data?.forEach(u => {
-        // Online if active in last 45 seconds (tightened for accuracy)
-        if (u.last_seen && (now - parseInt(u.last_seen)) < 45000) {
-            list.innerHTML += `<div class="member-item"><div class="status-dot"></div><span>${u.username} ${u.id === myUser.id ? '(You)' : ''}</span></div>`;
+        // Log to console so you can see if data is actually arriving
+        console.log(`User: ${u.username}, Last Seen: ${u.last_seen}`);
+
+        // Convert last_seen to a number and check if active in last 60 seconds
+        const lastActive = Number(u.last_seen);
+        if (lastActive && (now - lastActive) < 60000) {
+            list.innerHTML += `
+                <div class="member-item">
+                    <div class="status-dot"></div>
+                    <span>${u.username} ${u.id === myUser.id ? '(You)' : ''}</span>
+                </div>`;
         }
-        if (u.id !== myUser.id && u.is_typing) typers.push(u.username);
+        
+        if (u.id !== myUser.id && u.is_typing) {
+            typers.push(u.username);
+        }
     });
+    
     typingEl.innerText = typers.length > 0 ? typers.join(", ") + " is typing..." : "";
 }
 
