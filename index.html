@@ -7,229 +7,138 @@
     <style>
         :root { --bg: #0d1117; --card: #161b22; --text: #c9d1d9; --accent: #238636; --border: #30363d; --user-color: #f0f6fc; --danger: #da3633; --warning: #d29922; --reply-bg: #21262d; }
         * { box-sizing: border-box; -webkit-font-smoothing: antialiased; }
-        body { background: var(--bg); color: var(--text); font-family: 'Inter', sans-serif; margin: 0; display: flex; flex-direction: column; justify-content: center; align-items: center; height: 100vh; overflow: hidden; overscroll-behavior-y: contain; }
-        #app, #request-screen { width: 100%; max-width: 600px; height: 92vh; display: none; flex-direction: column; background: var(--card); border: 1px solid var(--border); border-radius: 12px; position: relative; margin: 10px; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+        body { background: var(--bg); color: var(--text); font-family: 'Inter', sans-serif; margin: 0; display: flex; flex-direction: column; align-items: center; height: 100vh; overflow: hidden; }
+        #app, #request-screen { width: 100%; max-width: 600px; height: 92vh; display: none; flex-direction: column; background: var(--card); border: 1px solid var(--border); border-radius: 12px; position: relative; margin: 10px; overflow: hidden; }
         @media (max-width: 600px) { #app, #request-screen { height: 100vh; margin: 0; border-radius: 0; } }
-        .chat-header { padding: 12px 20px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; background: #161b22; z-index: 10; }
+        .chat-header { padding: 12px 20px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; background: #161b22; }
         #pinned-container { background: #1c2128; border-bottom: 1px solid var(--border); padding: 8px 15px; font-size: 0.85rem; cursor: pointer; display: none; align-items: center; gap: 10px; color: #58a6ff; }
-        #chat { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 12px; scroll-behavior: smooth; }
-        .msg-container { position: relative; border-radius: 6px; padding: 4px 8px; transition: background 0.2s, transform 0.2s; max-width: 85%; }
-        .msg-container.my-msg { align-self: flex-end; text-align: right; background: rgba(35, 134, 54, 0.1); }
-        .msg-container.other-msg { align-self: flex-start; text-align: left; background: rgba(255, 255, 255, 0.03); }
-        .msg-line { margin: 0; line-height: 1.5; font-size: 0.95rem; word-wrap: break-word; }
+        #chat { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 12px; }
+        .msg-container { position: relative; border-radius: 6px; padding: 4px 8px; max-width: 85%; }
+        .my-msg { align-self: flex-end; text-align: right; background: rgba(35, 134, 54, 0.1); }
+        .other-msg { align-self: flex-start; text-align: left; background: rgba(255, 255, 255, 0.03); }
         .name { color: #58a6ff; font-weight: 700; margin-right: 6px; }
         .timestamp { font-size: 0.72rem; opacity: 0.4; margin-left: 8px; }
         .seen-status { font-size: 0.7rem; color: var(--accent); margin-left: 5px; opacity: 0.8; display: none; }
-        .reply-preview { background: var(--reply-bg); border-left: 3px solid var(--accent); padding: 5px 10px; margin-bottom: 5px; border-radius: 4px; font-size: 0.8rem; cursor: pointer; opacity: 0.8; text-align: left; }
-        .replying-now-ui { background: var(--reply-bg); padding: 10px; border-top: 1px solid var(--border); display: none; justify-content: space-between; align-items: center; }
-        .msg-actions { opacity: 0; position: absolute; top: -15px; background: var(--card); border: 1px solid var(--border); border-radius: 4px; padding: 2px; z-index: 5; }
+        .msg-actions { opacity: 0; position: absolute; top: -15px; background: var(--card); border: 1px solid var(--border); border-radius: 4px; padding: 2px; }
         .msg-container:hover .msg-actions { opacity: 1; }
-        .my-msg .msg-actions { right: 5px; }
-        .other-msg .msg-actions { left: 5px; }
+        .my-msg .msg-actions { right: 5px; } .other-msg .msg-actions { left: 5px; }
         .msg-actions button { padding: 2px 8px; font-size: 0.7rem; background: none; border: none; color: #8b949e; cursor: pointer; }
         .input-area { padding: 16px; border-top: 1px solid var(--border); background: var(--card); }
         textarea { width: 100%; background: var(--bg); border: 1px solid var(--border); color: var(--text); padding: 12px; border-radius: 8px; outline: none; resize: none; font-size: 16px; }
-        .controls { display: flex; justify-content: space-between; align-items: center; margin-top: 10px; }
-        #cooldown-txt { color: var(--danger); font-size: 0.8rem; font-weight: 600; display: none; }
-        #typing-indicator { height: 22px; padding: 0 20px; font-size: 0.8rem; color: var(--accent); font-weight: 500; }
-        #member-drawer { position: absolute; top: 0; right: -100%; width: 280px; height: 100%; background: #0d1117; border-left: 1px solid var(--border); transition: right 0.3s ease; z-index: 100; display: flex; flex-direction: column; }
+        #typing-indicator { height: 22px; padding: 0 20px; font-size: 0.8rem; color: var(--accent); }
+        #member-drawer { position: absolute; top: 0; right: -100%; width: 280px; height: 100%; background: #0d1117; border-left: 1px solid var(--border); transition: 0.3s; z-index: 100; }
         #member-drawer.open { right: 0; }
-        .drawer-header { padding: 20px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; font-weight: 600; }
-        .member-item { display: flex; align-items: center; gap: 12px; padding: 10px 20px; font-size: 0.9rem; }
-        .status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
-        .footer-credits { font-size: 0.65rem; opacity: 0.4; letter-spacing: 3px; margin-top: 10px; text-transform: uppercase; font-weight: 700; }
-        #maint-overlay { display: none; text-align: center; padding: 15px; color: var(--warning); font-weight: 600; background: rgba(210, 153, 34, 0.1); border-radius: 8px; border: 1px dashed var(--warning); }
+        .status-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); margin-right: 10px; }
+        #maint-overlay { display: none; text-align: center; padding: 15px; color: var(--warning); background: rgba(210, 153, 34, 0.1); }
     </style>
 </head>
 <body>
 
 <audio id="msg-sound" src="https://assets.mixkit.co/active_storage/sfx/2354/2354-preview.mp3" preload="auto"></audio>
-<div id="status" style="font-weight: 600; margin-top: 20px; color:white;">Authenticating...</div>
 
 <div id="request-screen">
-    <div style="flex:1; display:flex; flex-direction:column; justify-content:center; align-items:center; padding:40px; text-align:center;">
-        <h1 style="color: var(--danger); margin-bottom: 8px;">Access Required</h1>
-        <p style="font-size:0.85rem; opacity:0.6; margin-bottom: 24px;">UID: <code id="my-id-display" style="background: #000; padding: 2px 5px; border-radius: 4px;"></code></p>
-        <div style="width: 100%; max-width: 300px;">
-            <input type="text" id="req-name" placeholder="Enter Nickname" style="width: 100%; background: var(--bg); border: 1px solid var(--border); color: var(--text); padding: 12px; border-radius: 8px; outline: none; margin-bottom: 10px;">
-            <button id="reqBtn" style="width: 100%; background: var(--accent); color: white; border: none; padding: 12px; border-radius: 6px; cursor: pointer; font-weight: 600;">Request Access</button>
-            <p id="req-status" style="margin-top:15px; font-size: 0.85rem; font-weight: 500;"></p>
-        </div>
+    <div style="flex:1; display:flex; flex-direction:column; justify-content:center; align-items:center; padding:40px;">
+        <h1>Access Required</h1>
+        <p>UID: <code id="my-id-display"></code></p>
+        <input type="text" id="req-name" placeholder="Nickname" style="width:100%; padding:10px; margin:10px 0;">
+        <button id="reqBtn" style="width:100%; padding:10px; background:var(--accent); color:white; border:none;">Request Access</button>
+        <p id="req-status"></p>
     </div>
 </div>
 
 <div id="app">
     <div id="member-drawer">
-        <div class="drawer-header"><span>ACTIVE MEMBERS</span><button style="background:none; border:none; color:white; font-size:1.5rem;" onclick="toggleDrawer()">×</button></div>
-        <div id="active-list" style="overflow-y: auto;"></div>
+        <div style="padding:20px; border-bottom:1px solid var(--border);">MEMBERS <button onclick="toggleDrawer()">×</button></div>
+        <div id="active-list"></div>
     </div>
-    
     <div id="pinned-container" onclick="scrollToMessage(this.dataset.targetId)">📌 <span id="pinned-text"></span></div>
-
     <div class="chat-header">
-        <span id="display-name" style="font-weight:700; font-size: 1.1rem;">Chat</span>
-        <button style="background:none; border:none; color:white; font-size:1.2rem;" onclick="toggleDrawer()">☰</button>
+        <span id="display-name" style="font-weight:700;">Chat</span>
+        <button onclick="toggleDrawer()">☰</button>
     </div>
-
     <div id="chat"></div>
     <div id="typing-indicator"></div>
-
-    <div id="reply-box" class="replying-now-ui">
-        <div>Replying to: <span id="reply-target-name" style="color:var(--accent)"></span></div>
-        <button onclick="cancelReply()" style="background:none; border:none; color:var(--danger); font-size:1.2rem; cursor:pointer;">×</button>
-    </div>
-
     <div class="input-area">
         <div id="input-fields">
-            <textarea id="msg" placeholder="Type a message..." rows="2"></textarea>
-            <div id="cooldown-txt">Too fast! Wait 5s.</div>
-            <div class="controls">
-                <button id="nameBtn" style="background:transparent; border:1px solid var(--border); color:var(--text); padding: 10px 18px; border-radius: 6px; cursor:pointer;">Nickname</button>
-                <button id="sendBtn" style="background:var(--accent); color:white; border:none; padding: 10px 18px; border-radius: 6px; cursor:pointer; font-weight:600;">Send Message</button>
+            <textarea id="msg" placeholder="Type..." rows="2"></textarea>
+            <div style="display:flex; justify-content:space-between; margin-top:10px;">
+                <button id="nameBtn">Nickname</button>
+                <button id="sendBtn" style="background:var(--accent); color:white; padding:8px 15px; border:none;">Send</button>
             </div>
         </div>
-        <div id="maint-overlay">SYSTEM UNDER MAINTENANCE</div>
+        <div id="maint-overlay">MAINTENANCE MODE ACTIVE</div>
     </div>
 </div>
 
-<div class="footer-credits">DEVELOPED BY NAMELESS</div>
-
 <script type="module">
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm'
+const supabase = createClient("https://pgdytywttdrqakczrprg.supabase.co", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBnZHl0eXd0dGRycWFrY3pycHJnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY1MzMzMjYsImV4cCI6MjA5MjEwOTMyNn0.Owa5xlrvrw0p0lJ1AEqIxnudvTyxSSjKqZgX48j2KQA");
 
-const SUPABASE_URL = "https://pgdytywttdrqakczrprg.supabase.co";
-const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBnZHl0eXd0dGRycWFrY3pycHJnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY1MzMzMjYsImV4cCI6MjA5MjEwOTMyNn0.Owa5xlrvrw0p0lJ1AEqIxnudvTyxSSjKqZgX48j2KQA";
-const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
-
-let currentReply = null;
-let editingId = null;
-let lastMsgTime = 0;
-let isCooldown = false;
-let myUsername = "";
 let myUser = null;
+let myUsername = "";
 let othersActive = false;
 
-// --- UTILITIES ---
 window.toggleDrawer = () => document.getElementById('member-drawer').classList.toggle('open');
-window.scrollToMessage = (id) => {
-    const el = document.getElementById(`msg-${id}`);
-    if(el) {
-        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        el.style.background = "rgba(35, 134, 54, 0.3)";
-        setTimeout(() => el.style.background = "", 1500);
-    }
-};
+window.scrollToMessage = (id) => { const el = document.getElementById(`msg-${id}`); if(el) el.scrollIntoView({behavior:'smooth', block:'center'}); };
 
-// --- CORE FUNCTIONS ---
 function appendMsg(m, isBulk = false) {
     if (document.getElementById(`msg-${m.id}`)) return;
     const chat = document.getElementById("chat");
-
     if (m.type === 'announcement') {
-        const annDiv = document.createElement('div');
-        annDiv.style = "background: rgba(31, 111, 235, 0.1); border: 1px solid #1f6feb; padding: 12px; margin: 8px 0; border-radius: 8px; text-align: center; color: #58a6ff; font-size: 0.85rem; width: 100%;";
-        annDiv.innerHTML = `📢 <strong>SYSTEM:</strong> ${m.msg}`;
-        chat.appendChild(annDiv);
-        if (!isBulk) chat.scrollTop = chat.scrollHeight;
+        chat.innerHTML += `<div style="text-align:center; color:#58a6ff; font-size:0.8rem; margin:10px 0;">📢 ${m.msg}</div>`;
+        if(!isBulk) chat.scrollTop = chat.scrollHeight;
         return;
     }
-
     const isMe = m.uid === myUser.id;
-    const align = isMe ? 'my-msg' : 'other-msg';
-    const timeStr = new Date(m.time).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
-
-    const msgDiv = document.createElement('div');
-    msgDiv.className = `msg-container ${align}`;
-    msgDiv.id = `msg-${m.id}`;
-    msgDiv.innerHTML = `
-        <div class="msg-actions">
-            <button onclick="startReply('${m.id}', '${m.name}')">Reply</button>
-            ${isMe ? `<button onclick="startEdit('${m.id}')">Edit</button><button onclick="deleteMsg('${m.id}')" style="color:var(--danger)">Delete</button>` : ''}
-        </div>
-        ${m.reply_to ? `<div class="reply-preview" onclick="scrollToMessage('${m.reply_to.id}')"><b>${m.reply_to.name}:</b> ${m.reply_to.msg}</div>` : ''}
-        <p class="msg-line">
-            <span class="name">${m.name}<span class="timestamp">${timeStr}</span>:</span>
-            <span class="msg-content">${m.msg}</span>
-            ${isMe ? `<span class="seen-status" id="seen-${m.id}">(seen)</span>` : ''}
-        </p>
+    const timeStr = new Date(m.time).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+    const div = document.createElement('div');
+    div.className = `msg-container ${isMe?'my-msg':'other-msg'}`;
+    div.id = `msg-${m.id}`;
+    div.innerHTML = `
+        <div class="msg-actions"><button onclick="deleteMsg('${m.id}')">Delete</button></div>
+        <span class="name">${m.name}<span class="timestamp">${timeStr}</span>:</span>
+        <span class="msg-content">${m.msg}</span>
+        ${isMe ? `<span class="seen-status" style="display:${othersActive?'inline':'none'}">(seen)</span>` : ''}
     `;
-    chat.appendChild(msgDiv);
-    
-    // Seen Logic
-    if (isMe && othersActive) document.getElementById(`seen-${m.id}`).style.display = "inline";
-
-    if (!isBulk) {
-        chat.scrollTop = chat.scrollHeight;
-        if (!isMe) document.getElementById('msg-sound').play().catch(()=>{});
-    }
+    chat.appendChild(div);
+    if (!isBulk) { chat.scrollTop = chat.scrollHeight; if(!isMe) document.getElementById('msg-sound').play(); }
 }
 
-async function updateMemberList() {
+async function updateStatus() {
     const { data } = await supabase.from('allowed_users').select('*');
     const list = document.getElementById("active-list");
-    const typingEl = document.getElementById("typing-indicator");
-    list.innerHTML = ""; 
+    list.innerHTML = "";
     let typers = [];
     let someoneElseActive = false;
-
     data?.forEach(u => {
-        const diffMins = Math.floor((Date.now() - Number(u.last_seen)) / 60000);
-        if (diffMins < 1 || u.id === myUser.id) {
-            list.innerHTML += `<div class="member-item"><div class="status-dot"></div><span>${u.username}</span></div>`;
-            if (u.id !== myUser.id) someoneElseActive = true;
+        const isOnline = (Date.now() - u.last_seen) < 40000;
+        if(isOnline) {
+            list.innerHTML += `<div style="padding:10px 20px;"><span class="status-dot"></span>${u.username}</div>`;
+            if(u.id !== myUser.id) someoneElseActive = true;
+            if(u.is_typing && u.id !== myUser.id) typers.push(u.username);
         }
-        if (u.id !== myUser.id && u.is_typing) typers.push(u.username);
     });
-    
     othersActive = someoneElseActive;
-    typingEl.innerText = typers.length > 0 ? typers.join(", ") + " is typing..." : "";
-    
-    // Update seen status for existing messages
-    if (othersActive) {
-        document.querySelectorAll('.seen-status').forEach(s => s.style.display = "inline");
-    }
+    document.querySelectorAll('.seen-status').forEach(s => s.style.display = othersActive ? "inline" : "none");
+    document.getElementById("typing-indicator").innerText = typers.length ? typers.join(",")+" is typing..." : "";
 }
 
 async function syncSystem() {
     const { data } = await supabase.from('system_settings').select('*');
-    const maint = data?.find(s => s.key === 'maintenance')?.value?.enabled;
+    const maint = data.find(s => s.key === 'maintenance')?.value?.enabled;
+    const pin = data.find(s => s.key === 'pin')?.value;
     document.getElementById("input-fields").style.display = maint ? "none" : "block";
     document.getElementById("maint-overlay").style.display = maint ? "block" : "none";
-
-    const pin = data?.find(s => s.key === 'pin')?.value;
-    const pinBar = document.getElementById("pinned-container");
-    if (pin?.msg) {
-        pinBar.style.display = "flex";
-        document.getElementById("pinned-text").innerText = pin.msg;
-        pinBar.dataset.targetId = pin.id;
-    } else {
-        pinBar.style.display = "none";
-    }
-}
-
-function setupRealtime() {
-    supabase.channel('room1')
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'messages' }, payload => {
-        if (payload.eventType === 'INSERT') appendMsg(payload.new);
-        else if (payload.eventType === 'UPDATE') {
-            const el = document.getElementById(`msg-${payload.new.id}`);
-            if(el) el.querySelector('.msg-content').innerText = payload.new.msg;
-        }
-        else if (payload.eventType === 'DELETE') document.getElementById(`msg-${payload.old.id}`)?.remove();
-    })
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'allowed_users' }, () => updateMemberList())
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'system_settings' }, () => syncSystem())
-    .subscribe();
+    const pb = document.getElementById("pinned-container");
+    if(pin?.msg) { pb.style.display="flex"; document.getElementById("pinned-text").innerText=pin.msg; pb.dataset.targetId=pin.id; }
+    else pb.style.display="none";
 }
 
 async function init() {
     let { data: { session } } = await supabase.auth.getSession();
     if (!session) { const { data } = await supabase.auth.signInAnonymously(); session = data.session; }
     myUser = session.user;
-    
     const { data: profile } = await supabase.from('allowed_users').select('*').eq('id', myUser.id).single();
-    document.getElementById("status").style.display = "none";
-
     if (!profile || profile.role === 'pending') {
         document.getElementById("request-screen").style.display = "flex";
         document.getElementById("my-id-display").innerText = myUser.id;
@@ -237,47 +146,38 @@ async function init() {
         myUsername = profile.username;
         document.getElementById("app").style.display = "flex";
         document.getElementById("display-name").innerText = myUsername;
-        const { data: msgs } = await supabase.from('messages').select('*').order('time', { ascending: true }).limit(50);
+        const { data: msgs } = await supabase.from('messages').select('*').order('time', { ascending: true });
         msgs?.forEach(m => appendMsg(m, true));
-        setupRealtime();
+        
+        supabase.channel('main').on('postgres_changes', { event: '*', schema: 'public' }, (p) => {
+            if(p.table==='messages' && p.eventType==='INSERT') appendMsg(p.new);
+            if(p.table==='allowed_users') updateStatus();
+            if(p.table==='system_settings') syncSystem();
+        }).subscribe();
+
         syncSystem();
+        updateStatus();
         setInterval(() => supabase.from('allowed_users').update({ last_seen: Date.now() }).eq('id', myUser.id), 15000);
     }
 }
 
-document.getElementById("reqBtn").onclick = async () => {
-    const n = document.getElementById("req-name").value.trim();
-    if(n) await supabase.from('allowed_users').upsert([{ id: myUser.id, username: n, role: 'pending', last_seen: Date.now() }]);
-    document.getElementById("req-status").innerText = "⏳ Sent!";
-};
-
 document.getElementById("sendBtn").onclick = async () => {
-    const inp = document.getElementById("msg");
-    if(!inp.value.trim() || isCooldown) return;
-    if(editingId) {
-        await supabase.from('messages').update({ msg: inp.value }).eq('id', editingId);
-        editingId = null; document.getElementById("sendBtn").innerText = "Send Message";
-    } else {
-        await supabase.from('messages').insert([{ uid: myUser.id, name: myUsername, msg: inp.value, reply_to: currentReply, time: new Date().toISOString() }]);
-    }
-    inp.value = ""; cancelReply();
+    const v = document.getElementById("msg").value;
+    if(!v.trim()) return;
+    await supabase.from('messages').insert([{ uid: myUser.id, name: myUsername, msg: v, time: new Date().toISOString() }]);
+    document.getElementById("msg").value = "";
 };
 
-window.startReply = (id, name) => {
-    const txt = document.querySelector(`#msg-${id} .msg-content`).innerText;
-    currentReply = { id, name, msg: txt.substring(0, 50) };
-    document.getElementById("reply-box").style.display = "flex";
-    document.getElementById("reply-target-name").innerText = name;
+document.getElementById("reqBtn").onclick = async () => {
+    const n = document.getElementById("req-name").value;
+    await supabase.from('allowed_users').upsert([{ id: myUser.id, username: n, role: 'pending', last_seen: Date.now() }]);
+    document.getElementById("req-status").innerText = "Requested!";
 };
-window.cancelReply = () => { currentReply = null; document.getElementById("reply-box").style.display = "none"; };
-window.startEdit = (id) => { editingId = id; document.getElementById("msg").value = document.querySelector(`#msg-${id} .msg-content`).innerText; document.getElementById("sendBtn").innerText = "Update"; };
-window.deleteMsg = async (id) => { if(confirm("Delete?")) await supabase.from('messages').delete().eq('id', id); };
 
-let typeTimer;
+let t;
 document.getElementById("msg").oninput = () => {
     supabase.from('allowed_users').update({ is_typing: true }).eq('id', myUser.id);
-    clearTimeout(typeTimer);
-    typeTimer = setTimeout(() => supabase.from('allowed_users').update({ is_typing: false }).eq('id', myUser.id), 2000);
+    clearTimeout(t); t = setTimeout(() => supabase.from('allowed_users').update({ is_typing: false }).eq('id', myUser.id), 2000);
 };
 
 init();
