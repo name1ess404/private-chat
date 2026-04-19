@@ -60,14 +60,6 @@
         .status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
         .footer-credits { font-size: 0.65rem; opacity: 0.4; letter-spacing: 3px; margin-top: 10px; text-transform: uppercase; font-weight: 700; }
         #maint-overlay { display: none; text-align: center; padding: 15px; color: var(--warning); font-weight: 600; background: rgba(210, 153, 34, 0.1); border-radius: 8px; border: 1px dashed var(--warning); }
-
-        .seen-by-row { display: flex; align-items: center; gap: 5px; margin-top: 3px; font-size: 0.68rem; color: #8b949e; flex-wrap: wrap; position: relative; }
-        .my-msg .seen-by-row { justify-content: flex-end; }
-        .other-msg .seen-by-row { justify-content: flex-start; }
-        .seen-eye-icon { opacity: 0.55; font-size: 0.75rem; cursor: pointer; user-select: none; flex-shrink: 0; }
-        .seen-count { cursor: pointer; user-select: none; }
-        .seen-tooltip { display: none; position: absolute; bottom: calc(100% + 4px); background: #21262d; border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px; font-size: 0.72rem; color: #c9d1d9; z-index: 20; box-shadow: 0 4px 12px rgba(0,0,0,0.5); max-width: 200px; white-space: normal; line-height: 1.5; pointer-events: none; }
-        .seen-by-row:hover .seen-tooltip, .seen-by-row.tooltip-visible .seen-tooltip { display: block; }
     </style>
 </head>
 <body>
@@ -128,6 +120,7 @@
 <script type="module">
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm'
 
+// YOUR FIXED KEYS
 const SUPABASE_URL = "https://pgdytywttdrqakczrprg.supabase.co";
 const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBnZHl0eXd0dGRycWFrY3pycHJnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY1MzMzMjYsImV4cCI6MjA5MjEwOTMyNn0.Owa5xlrvrw0p0lJ1AEqIxnudvTyxSSjKqZgX48j2KQA";
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
@@ -164,24 +157,31 @@ const checkSpam = () => {
     return false;
 };
 
-// --- AUTH & INIT ---
 async function init() {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) {
-        await supabase.auth.signInAnonymously();
-        location.reload();
+    // 1. Check current session
+    let { data: { session } } = await supabase.auth.getSession();
+    
+    // 2. If no session, sign in anonymously (ONLY ONCE)
+    if (!session) {
+        const { data, error } = await supabase.auth.signInAnonymously();
+        if (data) session = data.session;
+    }
+    
+    if (!session) {
+        document.getElementById("status").innerText = "Auth Failed. Check Internet.";
         return;
     }
-    myUser = user;
+
+    myUser = session.user;
     
-    // Check Allowed status
-    const { data: profile } = await supabase.from('allowed_users').select('*').eq('id', user.id).single();
+    // 3. Check profile
+    const { data: profile } = await supabase.from('allowed_users').select('*').eq('id', myUser.id).single();
     
     document.getElementById("status").style.display = "none";
     if (!profile) {
         document.getElementById("app").style.display = "none";
         document.getElementById("request-screen").style.display = "flex";
-        document.getElementById("my-id-display").innerText = user.id;
+        document.getElementById("my-id-display").innerText = myUser.id;
     } else {
         myUsername = profile.username;
         document.getElementById("request-screen").style.display = "none";
@@ -195,41 +195,35 @@ async function init() {
 }
 
 async function loadInitialData() {
-    // Load Settings
-    const { data: settings } = await supabase.from('system_settings').select('*');
-    const maint = settings?.find(s => s.id === 'maintenance')?.value_bool;
-    document.getElementById("input-fields").style.display = maint ? "none" : "block";
-    document.getElementById("maint-overlay").style.display = maint ? "block" : "none";
-
-    // Load Messages
-    const { data: messages } = await supabase.from('messages').select('*').order('time', { ascending: true }).limit(40);
+    const { data: messages } = await supabase.from('messages').select('*').order('time', { ascending: true }).limit(50);
     messages?.forEach(m => appendMsg(m, true));
     const chat = document.getElementById("chat");
     chat.scrollTop = chat.scrollHeight;
 }
 
 function setupRealtime() {
-    // Listen for Messages
     supabase.channel('messages-all').on('postgres_changes', { event: '*', schema: 'public', table: 'messages' }, payload => {
         if (payload.eventType === 'INSERT') {
             appendMsg(payload.new);
             if (document.hidden) document.getElementById("msg-sound").play();
         } else if (payload.eventType === 'UPDATE') {
-            const el = document.querySelector(`#msg-${payload.new.id} .msg-line span:last-child`);
-            if (el) el.innerText = payload.new.msg;
-            if (payload.new.edited) {
-                const p = el.parentElement;
-                if (!p.querySelector('.edited-tag')) p.innerHTML += `<span class="edited-tag">(edited)</span>`;
+            const container = document.getElementById(`msg-${payload.new.id}`);
+            if (container) {
+                const textEl = container.querySelector('.msg-line span:last-child');
+                if (textEl) textEl.innerText = payload.new.msg;
+                if (payload.new.edited && !container.querySelector('.edited-tag')) {
+                    container.querySelector('.msg-line').innerHTML += `<span class="edited-tag">(edited)</span>`;
+                }
             }
         } else if (payload.eventType === 'DELETE') {
             document.getElementById(`msg-${payload.old.id}`)?.remove();
         }
     }).subscribe();
 
-    // Listen for Online Status & Typing
-    supabase.channel('online-users').on('postgres_changes', { event: '*', schema: 'public', table: 'allowed_users' }, payload => {
+    supabase.channel('online-users').on('postgres_changes', { event: '*', schema: 'public', table: 'allowed_users' }, () => {
         updateMemberUI();
     }).subscribe();
+    updateMemberUI();
 }
 
 async function updateMemberUI() {
@@ -239,7 +233,7 @@ async function updateMemberUI() {
     list.innerHTML = ""; let typers = [];
     
     users?.forEach(u => {
-        if ((Date.now() - (u.last_seen || 0)) < 90000) {
+        if ((Date.now() - (u.last_seen || 0)) < 60000) {
             list.innerHTML += `<div class="member-item"><div class="status-dot"></div><span>${u.username}</span></div>`;
         }
         if (u.id !== myUser.id && u.is_typing) typers.push(u.username);
@@ -249,7 +243,7 @@ async function updateMemberUI() {
 
 function setupHeartbeat() {
     const hb = () => supabase.from('allowed_users').update({ last_seen: Date.now() }).eq('id', myUser.id);
-    setInterval(hb, 60000); hb();
+    setInterval(hb, 30000); hb();
 }
 
 function appendMsg(m, isBulk = false) {
@@ -288,7 +282,6 @@ function appendMsg(m, isBulk = false) {
     if (!isBulk) chat.scrollTop = chat.scrollHeight;
 }
 
-// --- ACTIONS ---
 window.startReply = (id, name, msg) => {
     currentReply = { id, name, msg: msg.substring(0, 50) };
     document.getElementById("reply-box").style.display = "flex";
