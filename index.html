@@ -8,50 +8,29 @@
         :root { --bg: #0d1117; --card: #161b22; --text: #c9d1d9; --accent: #238636; --border: #30363d; --user-color: #f0f6fc; --danger: #da3633; --warning: #d29922; --reply-bg: #21262d; }
         * { box-sizing: border-box; -webkit-font-smoothing: antialiased; }
         body { background: var(--bg); color: var(--text); font-family: 'Inter', sans-serif; margin: 0; display: flex; flex-direction: column; justify-content: center; align-items: center; height: 100vh; overflow: hidden; overscroll-behavior-y: contain; }
-        
-        /* Screens */
         #app, #request-screen { width: 100%; max-width: 600px; height: 92vh; display: none; flex-direction: column; background: var(--card); border: 1px solid var(--border); border-radius: 12px; position: relative; margin: 10px; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
         @media (max-width: 600px) { #app, #request-screen { height: 100vh; margin: 0; border-radius: 0; } }
-        
-        /* Header & Pinned */
         .chat-header { padding: 12px 20px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; background: #161b22; z-index: 10; }
         #pinned-container { background: #1c2128; border-bottom: 1px solid var(--border); padding: 8px 15px; font-size: 0.85rem; cursor: pointer; display: none; align-items: center; gap: 10px; color: #58a6ff; }
-        
-        /* Chat Area */
         #chat { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 12px; scroll-behavior: smooth; }
-        .msg-container { position: relative; border-radius: 6px; padding: 8px 12px; transition: background 0.2s, transform 0.2s; max-width: 85%; }
+        .msg-container { position: relative; border-radius: 6px; padding: 4px 8px; transition: background 0.2s, transform 0.2s; max-width: 85%; }
         .msg-container.my-msg { align-self: flex-end; text-align: right; background: rgba(35, 134, 54, 0.1); }
         .msg-container.other-msg { align-self: flex-start; text-align: left; background: rgba(255, 255, 255, 0.03); }
-        
-        /* Announcements */
-        .announcement { background: rgba(31, 111, 235, 0.1); border: 1px solid #1f6feb; padding: 15px; margin: 10px 0; border-radius: 10px; text-align: center; color: #58a6ff; font-size: 0.9rem; font-weight: 500; width: 100%; align-self: center; }
-
-        @keyframes highlight-flash { 0% { background: var(--accent); box-shadow: 0 0 20px var(--accent); transform: scale(1.02); } 100% { background: transparent; box-shadow: none; transform: scale(1); } }
-        .highlight-active { animation: highlight-flash 1.5s ease-out; z-index: 100; }
-        
         .msg-line { margin: 0; line-height: 1.5; font-size: 0.95rem; word-wrap: break-word; }
         .name { color: #58a6ff; font-weight: 700; margin-right: 6px; }
         .timestamp { font-size: 0.72rem; opacity: 0.4; margin-left: 8px; }
-        .edited-tag { font-size: 0.7rem; opacity: 0.5; font-style: italic; margin-left: 5px; }
-        
-        /* Replies */
+        .seen-status { font-size: 0.7rem; color: var(--accent); margin-left: 5px; opacity: 0.8; display: none; }
         .reply-preview { background: var(--reply-bg); border-left: 3px solid var(--accent); padding: 5px 10px; margin-bottom: 5px; border-radius: 4px; font-size: 0.8rem; cursor: pointer; opacity: 0.8; text-align: left; }
         .replying-now-ui { background: var(--reply-bg); padding: 10px; border-top: 1px solid var(--border); display: none; justify-content: space-between; align-items: center; }
-        
-        /* Actions */
         .msg-actions { opacity: 0; position: absolute; top: -15px; background: var(--card); border: 1px solid var(--border); border-radius: 4px; padding: 2px; z-index: 5; }
         .msg-container:hover .msg-actions { opacity: 1; }
         .my-msg .msg-actions { right: 5px; }
         .other-msg .msg-actions { left: 5px; }
         .msg-actions button { padding: 2px 8px; font-size: 0.7rem; background: none; border: none; color: #8b949e; cursor: pointer; }
-        
-        /* Input Area */
         .input-area { padding: 16px; border-top: 1px solid var(--border); background: var(--card); }
         textarea { width: 100%; background: var(--bg); border: 1px solid var(--border); color: var(--text); padding: 12px; border-radius: 8px; outline: none; resize: none; font-size: 16px; }
         .controls { display: flex; justify-content: space-between; align-items: center; margin-top: 10px; }
         #cooldown-txt { color: var(--danger); font-size: 0.8rem; font-weight: 600; display: none; }
-        
-        /* UI Elements */
         #typing-indicator { height: 22px; padding: 0 20px; font-size: 0.8rem; color: var(--accent); font-weight: 500; }
         #member-drawer { position: absolute; top: 0; right: -100%; width: 280px; height: 100%; background: #0d1117; border-left: 1px solid var(--border); transition: right 0.3s ease; z-index: 100; display: flex; flex-direction: column; }
         #member-drawer.open { right: 0; }
@@ -105,7 +84,7 @@
             <textarea id="msg" placeholder="Type a message..." rows="2"></textarea>
             <div id="cooldown-txt">Too fast! Wait 5s.</div>
             <div class="controls">
-                <button id="nameBtn" style="background:transparent; border:1px solid var(--border); color:var(--text); padding: 10px 18px; border-radius: 6px; cursor:pointer;">Rename</button>
+                <button id="nameBtn" style="background:transparent; border:1px solid var(--border); color:var(--text); padding: 10px 18px; border-radius: 6px; cursor:pointer;">Nickname</button>
                 <button id="sendBtn" style="background:var(--accent); color:white; border:none; padding: 10px 18px; border-radius: 6px; cursor:pointer; font-weight:600;">Send Message</button>
             </div>
         </div>
@@ -128,6 +107,7 @@ let lastMsgTime = 0;
 let isCooldown = false;
 let myUsername = "";
 let myUser = null;
+let othersActive = false;
 
 // --- UTILITIES ---
 window.toggleDrawer = () => document.getElementById('member-drawer').classList.toggle('open');
@@ -135,21 +115,9 @@ window.scrollToMessage = (id) => {
     const el = document.getElementById(`msg-${id}`);
     if(el) {
         el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        el.classList.add('highlight-active');
-        setTimeout(() => el.classList.remove('highlight-active'), 1500);
+        el.style.background = "rgba(35, 134, 54, 0.3)";
+        setTimeout(() => el.style.background = "", 1500);
     }
-};
-
-const checkSpam = () => {
-    const now = Date.now();
-    if (now - lastMsgTime < 1000) {
-        isCooldown = true;
-        document.getElementById('cooldown-txt').style.display = 'block';
-        setTimeout(() => { isCooldown = false; document.getElementById('cooldown-txt').style.display = 'none'; }, 5000);
-        return true;
-    }
-    lastMsgTime = now;
-    return false;
 };
 
 // --- CORE FUNCTIONS ---
@@ -157,18 +125,15 @@ function appendMsg(m, isBulk = false) {
     if (document.getElementById(`msg-${m.id}`)) return;
     const chat = document.getElementById("chat");
 
-    // 1. ANNOUNCEMENT HANDLING
     if (m.type === 'announcement') {
         const annDiv = document.createElement('div');
-        annDiv.className = "announcement";
-        annDiv.id = `msg-${m.id}`;
+        annDiv.style = "background: rgba(31, 111, 235, 0.1); border: 1px solid #1f6feb; padding: 12px; margin: 8px 0; border-radius: 8px; text-align: center; color: #58a6ff; font-size: 0.85rem; width: 100%;";
         annDiv.innerHTML = `📢 <strong>SYSTEM:</strong> ${m.msg}`;
         chat.appendChild(annDiv);
         if (!isBulk) chat.scrollTop = chat.scrollHeight;
         return;
     }
 
-    // 2. NORMAL MESSAGE HANDLING
     const isMe = m.uid === myUser.id;
     const align = isMe ? 'my-msg' : 'other-msg';
     const timeStr = new Date(m.time).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
@@ -179,17 +144,20 @@ function appendMsg(m, isBulk = false) {
     msgDiv.innerHTML = `
         <div class="msg-actions">
             <button onclick="startReply('${m.id}', '${m.name}')">Reply</button>
-            ${isMe ? `<button onclick="startEdit('${m.id}')">Edit</button>` : ''}
-            ${isMe ? `<button onclick="deleteMsg('${m.id}')" style="color:var(--danger)">Delete</button>` : ''}
+            ${isMe ? `<button onclick="startEdit('${m.id}')">Edit</button><button onclick="deleteMsg('${m.id}')" style="color:var(--danger)">Delete</button>` : ''}
         </div>
         ${m.reply_to ? `<div class="reply-preview" onclick="scrollToMessage('${m.reply_to.id}')"><b>${m.reply_to.name}:</b> ${m.reply_to.msg}</div>` : ''}
         <p class="msg-line">
             <span class="name">${m.name}<span class="timestamp">${timeStr}</span>:</span>
             <span class="msg-content">${m.msg}</span>
-            ${m.edited ? '<span class="edited-tag">(edited)</span>' : ''}
+            ${isMe ? `<span class="seen-status" id="seen-${m.id}">(seen)</span>` : ''}
         </p>
     `;
     chat.appendChild(msgDiv);
+    
+    // Seen Logic
+    if (isMe && othersActive) document.getElementById(`seen-${m.id}`).style.display = "inline";
+
     if (!isBulk) {
         chat.scrollTop = chat.scrollHeight;
         if (!isMe) document.getElementById('msg-sound').play().catch(()=>{});
@@ -202,32 +170,32 @@ async function updateMemberList() {
     const typingEl = document.getElementById("typing-indicator");
     list.innerHTML = ""; 
     let typers = [];
-    const now = Date.now();
+    let someoneElseActive = false;
 
     data?.forEach(u => {
-        const lastActive = Number(u.last_seen);
-        if (!lastActive) return;
-        const diffMins = Math.floor((now - lastActive) / 60000);
-        
+        const diffMins = Math.floor((Date.now() - Number(u.last_seen)) / 60000);
         if (diffMins < 1 || u.id === myUser.id) {
-            list.innerHTML += `<div class="member-item"><div class="status-dot"></div><div><span>${u.username}</span><br><small style="opacity:0.5">Active</small></div></div>`;
-        } else if (diffMins < 5) {
-            list.innerHTML += `<div class="member-item"><div class="status-dot" style="background:#555"></div><div><span>${u.username}</span><br><small style="opacity:0.5">${diffMins}m ago</small></div></div>`;
+            list.innerHTML += `<div class="member-item"><div class="status-dot"></div><span>${u.username}</span></div>`;
+            if (u.id !== myUser.id) someoneElseActive = true;
         }
         if (u.id !== myUser.id && u.is_typing) typers.push(u.username);
     });
+    
+    othersActive = someoneElseActive;
     typingEl.innerText = typers.length > 0 ? typers.join(", ") + " is typing..." : "";
+    
+    // Update seen status for existing messages
+    if (othersActive) {
+        document.querySelectorAll('.seen-status').forEach(s => s.style.display = "inline");
+    }
 }
 
 async function syncSystem() {
     const { data } = await supabase.from('system_settings').select('*');
-    
-    // 1. Maintenance Mode
-    const isMaint = data?.find(s => s.key === 'maintenance')?.value?.enabled;
-    document.getElementById("input-fields").style.display = isMaint ? "none" : "block";
-    document.getElementById("maint-overlay").style.display = isMaint ? "block" : "none";
+    const maint = data?.find(s => s.key === 'maintenance')?.value?.enabled;
+    document.getElementById("input-fields").style.display = maint ? "none" : "block";
+    document.getElementById("maint-overlay").style.display = maint ? "block" : "none";
 
-    // 2. Pinned Message
     const pin = data?.find(s => s.key === 'pin')?.value;
     const pinBar = document.getElementById("pinned-container");
     if (pin?.msg) {
@@ -239,19 +207,13 @@ async function syncSystem() {
     }
 }
 
-// --- SYSTEM ---
 function setupRealtime() {
     supabase.channel('room1')
     .on('postgres_changes', { event: '*', schema: 'public', table: 'messages' }, payload => {
         if (payload.eventType === 'INSERT') appendMsg(payload.new);
         else if (payload.eventType === 'UPDATE') {
             const el = document.getElementById(`msg-${payload.new.id}`);
-            if(el && el.querySelector('.msg-content')) {
-                el.querySelector('.msg-content').innerText = payload.new.msg;
-                if(payload.new.edited && !el.querySelector('.edited-tag')) {
-                    el.querySelector('.msg-line').insertAdjacentHTML('beforeend', `<span class="edited-tag">(edited)</span>`);
-                }
-            }
+            if(el) el.querySelector('.msg-content').innerText = payload.new.msg;
         }
         else if (payload.eventType === 'DELETE') document.getElementById(`msg-${payload.old.id}`)?.remove();
     })
@@ -269,33 +231,36 @@ async function init() {
     document.getElementById("status").style.display = "none";
 
     if (!profile || profile.role === 'pending') {
-        document.getElementById("app").style.display = "none";
         document.getElementById("request-screen").style.display = "flex";
         document.getElementById("my-id-display").innerText = myUser.id;
-        if(profile?.role === 'pending') document.getElementById("req-status").innerText = "⏳ Request pending approval...";
-    } else if (profile.role === 'banned') {
-        document.body.innerHTML = "<h1 style='color:white; text-align:center; margin-top:50px;'>YOU ARE BANNED</h1>";
     } else {
         myUsername = profile.username;
-        document.getElementById("request-screen").style.display = "none";
         document.getElementById("app").style.display = "flex";
         document.getElementById("display-name").innerText = myUsername;
-        
-        const { data: msgs } = await supabase.from('messages').select('*').order('time', { ascending: true }).limit(100);
+        const { data: msgs } = await supabase.from('messages').select('*').order('time', { ascending: true }).limit(50);
         msgs?.forEach(m => appendMsg(m, true));
-        
         setupRealtime();
         syncSystem();
-        setInterval(() => supabase.from('allowed_users').update({ last_seen: Date.now() }).eq('id', myUser.id), 20000);
+        setInterval(() => supabase.from('allowed_users').update({ last_seen: Date.now() }).eq('id', myUser.id), 15000);
     }
 }
 
-// --- EVENTS ---
 document.getElementById("reqBtn").onclick = async () => {
     const n = document.getElementById("req-name").value.trim();
-    if(!n) return;
-    const { error } = await supabase.from('allowed_users').upsert([{ id: myUser.id, username: n, role: 'pending', last_seen: Date.now() }]);
-    document.getElementById("req-status").innerText = error ? "❌ Error: " + error.message : "⏳ Request Sent! Wait for Admin.";
+    if(n) await supabase.from('allowed_users').upsert([{ id: myUser.id, username: n, role: 'pending', last_seen: Date.now() }]);
+    document.getElementById("req-status").innerText = "⏳ Sent!";
+};
+
+document.getElementById("sendBtn").onclick = async () => {
+    const inp = document.getElementById("msg");
+    if(!inp.value.trim() || isCooldown) return;
+    if(editingId) {
+        await supabase.from('messages').update({ msg: inp.value }).eq('id', editingId);
+        editingId = null; document.getElementById("sendBtn").innerText = "Send Message";
+    } else {
+        await supabase.from('messages').insert([{ uid: myUser.id, name: myUsername, msg: inp.value, reply_to: currentReply, time: new Date().toISOString() }]);
+    }
+    inp.value = ""; cancelReply();
 };
 
 window.startReply = (id, name) => {
@@ -303,39 +268,10 @@ window.startReply = (id, name) => {
     currentReply = { id, name, msg: txt.substring(0, 50) };
     document.getElementById("reply-box").style.display = "flex";
     document.getElementById("reply-target-name").innerText = name;
-    document.getElementById("msg").focus();
 };
-
 window.cancelReply = () => { currentReply = null; document.getElementById("reply-box").style.display = "none"; };
-
-window.startEdit = (id) => { 
-    editingId = id; 
-    document.getElementById("msg").value = document.querySelector(`#msg-${id} .msg-content`).innerText;
-    document.getElementById("sendBtn").innerText = "Update"; 
-};
-
+window.startEdit = (id) => { editingId = id; document.getElementById("msg").value = document.querySelector(`#msg-${id} .msg-content`).innerText; document.getElementById("sendBtn").innerText = "Update"; };
 window.deleteMsg = async (id) => { if(confirm("Delete?")) await supabase.from('messages').delete().eq('id', id); };
-
-document.getElementById("sendBtn").onclick = async () => {
-    const inp = document.getElementById("msg");
-    const val = inp.value.trim();
-    if(!val || isCooldown || checkSpam()) return;
-    if(editingId) {
-        await supabase.from('messages').update({ msg: val, edited: true }).eq('id', editingId);
-        editingId = null; document.getElementById("sendBtn").innerText = "Send Message";
-    } else {
-        await supabase.from('messages').insert([{ uid: myUser.id, name: myUsername, msg: val, reply_to: currentReply, time: new Date().toISOString() }]);
-    }
-    inp.value = ""; cancelReply();
-};
-
-document.getElementById("nameBtn").onclick = async () => {
-    const n = prompt("New nickname:");
-    if(n) {
-        await supabase.from('allowed_users').update({ username: n }).eq('id', myUser.id);
-        location.reload();
-    }
-};
 
 let typeTimer;
 document.getElementById("msg").oninput = () => {

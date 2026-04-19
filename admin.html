@@ -6,7 +6,7 @@
     <style>
         :root { --bg: #0d1117; --card: #161b22; --text: #c9d1d9; --border: #30363d; --accent: #1f6feb; --danger: #da3633; --success: #238636; --warning: #d29922; }
         * { box-sizing: border-box; }
-        body { background: var(--bg); color: var(--text); font-family: 'Inter', -apple-system, sans-serif; margin: 0; display: flex; height: 100vh; overflow: hidden; }
+        body { background: var(--bg); color: var(--text); font-family: 'Inter', sans-serif; margin: 0; display: flex; height: 100vh; overflow: hidden; }
         #sidebar { width: 60%; border-right: 1px solid var(--border); padding: 25px; overflow-y: auto; }
         #tools { width: 40%; padding: 25px; background: #090c10; overflow-y: auto; }
         .section { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 20px; margin-bottom: 25px; }
@@ -23,11 +23,9 @@
         .btn-danger { background: var(--danger); color: white; }
         .btn-warning { background: var(--warning); color: white; }
         .btn-action { background: #30363d; color: white; }
-        .btn-kick { background: #f85149; color: white; }
-        textarea { width: 100%; background: #000; color: #fff; border: 1px solid var(--border); padding: 12px; border-radius: 6px; resize: none; font-family: inherit; font-size: 0.9rem; }
-        #status-overlay { position: fixed; inset: 0; background: var(--bg); display: flex; justify-content: center; align-items: center; z-index: 100; font-weight: bold; font-size: 1.2rem; }
+        textarea { width: 100%; background: #000; color: #fff; border: 1px solid var(--border); padding: 12px; border-radius: 6px; resize: none; }
+        #status-overlay { position: fixed; inset: 0; background: var(--bg); display: flex; justify-content: center; align-items: center; z-index: 100; font-weight: bold; }
         .msg-preview-item { padding: 10px; border-bottom: 1px solid var(--border); font-size: 0.85rem; }
-        .msg-preview-item:hover { background: rgba(255,255,255,0.05); }
     </style>
 </head>
 <body>
@@ -46,20 +44,19 @@
 <div id="tools">
     <h3>System Controls</h3>
     <div class="section">
-        <p style="font-size:0.85rem; opacity:0.7; margin-bottom: 10px;">Maintenance Mode</p>
-        <button id="maintBtn" style="width:100%; padding:12px;" onclick="toggleMaint()">Loading Status...</button>
+        <p style="font-size:0.85rem; opacity:0.7;">Maintenance Mode</p>
+        <button id="maintBtn" style="width:100%;" onclick="toggleMaint()">Loading...</button>
     </div>
     <div class="section">
-        <p style="font-size:0.85rem; opacity:0.7; margin-bottom: 10px;">Pinned Message</p>
+        <p style="font-size:0.85rem; opacity:0.7;">Pinned Message</p>
         <div id="active-pin" style="font-size: 0.8rem; margin-bottom: 10px; color: var(--warning);">None</div>
         <button class="btn-danger" style="width:100%;" onclick="unpinMessage()">Remove Pin</button>
     </div>
     <div class="section">
-        <p style="font-size:0.85rem; opacity:0.7; margin-bottom: 10px;">Global Announcement</p>
+        <p style="font-size:0.85rem; opacity:0.7;">Global Announcement</p>
         <textarea id="ann-msg" rows="3" placeholder="Type message..."></textarea>
-        <button class="btn-success" style="width:100%; margin-top:10px; padding: 10px;" onclick="sendAnn()">Broadcast Message</button>
+        <button class="btn-success" style="width:100%; margin-top:10px;" onclick="sendAnn()">Broadcast</button>
     </div>
-    <button class="btn-danger" style="width:100%; padding:12px; opacity:0.6;" onclick="wipeChat()">Wipe Chat History (Safe)</button>
 </div>
 
 <script type="module">
@@ -73,131 +70,79 @@ let myUser = null;
 
 async function checkAuth() {
     let { data: { session } } = await supabase.auth.getSession();
-    if (!session) {
-        const { data } = await supabase.auth.signInAnonymously();
-        session = data.session;
-    }
+    if (!session) { const { data } = await supabase.auth.signInAnonymously(); session = data.session; }
     myUser = session.user;
 
     const { data: profile } = await supabase.from('allowed_users').select('*').eq('id', myUser.id).single();
-    
     if (profile && profile.role === 'admin') {
         document.getElementById("status-overlay").style.display = "none";
-        initDashboard();
+        setupRealtime();
     } else {
-        document.body.innerHTML = "<h1 style='text-align:center; padding-top:50px; color:white;'>UNAUTHORIZED ACCESS</h1>";
+        document.body.innerHTML = "<h1 style='color:white; text-align:center;'>UNAUTHORIZED</h1>";
     }
 }
 
-function initDashboard() {
-    setupRealtime();
-}
-
 function setupRealtime() {
-    // Realtime for User List & Requests
-    supabase.channel('admin_users')
+    supabase.channel('admin_sync')
         .on('postgres_changes', { event: '*', schema: 'public', table: 'allowed_users' }, () => loadMembers())
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'system_settings' }, () => syncUI())
+        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, () => loadMessages())
         .subscribe();
-
-    // Realtime for Settings
-    supabase.channel('admin_settings')
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'system_settings' }, () => syncSystemUI())
-        .subscribe();
-
     loadMembers();
     loadMessages();
-    syncSystemUI();
+    syncUI();
 }
 
 async function loadMembers() {
     const { data: users } = await supabase.from('allowed_users').select('*');
     const reqTable = document.getElementById("requestTable");
     const userTable = document.getElementById("userTable");
-    
-    reqTable.innerHTML = "";
-    userTable.innerHTML = "";
+    reqTable.innerHTML = ""; userTable.innerHTML = "";
 
     users?.forEach(u => {
         if (u.role === 'pending') {
-            reqTable.innerHTML += `<tr><td><b>${u.username}</b><span class="uid-label">${u.id}</span></td>
-                <td style="text-align:right">
-                    <button class="btn-success" onclick="approve('${u.id}')">Allow</button>
-                    <button class="btn-danger" onclick="decline('${u.id}')">Deny</button>
-                </td></tr>`;
-        } else if (u.role !== 'declined' && u.role !== 'banned') {
-            const isOnline = (Date.now() - (Number(u.last_seen) || 0)) < 60000;
-            const isAdmin = u.role === 'admin';
-            const isMe = u.id === myUser.id;
-            
-            userTable.innerHTML += `<tr><td><div class="status-dot ${isOnline ? 'online' : ''}"></div><b>${u.username}</b> ${isAdmin ? '<span class="badge">ADMIN</span>' : ''} ${isMe ? '(You)' : ''}<span class="uid-label">${u.id}</span></td>
-                <td style="text-align:right">
-                <button class="btn-action" onclick="renameMember('${u.id}', '${u.username}')">Rename</button>
-                ${!isMe ? `<button class="btn-kick" onclick="kickUser('${u.id}', '${u.username}')">Kick</button>` : ''}
-                ${!isAdmin ? `<button class="btn-warning" onclick="makeAdmin('${u.id}')">Promote</button>` : ''}
-                ${!isMe ? `<button class="btn-danger" onclick="banUser('${u.id}', '${u.username}')">Ban</button>` : ''}</td></tr>`;
+            reqTable.innerHTML += `<tr><td><b>${u.username}</b></td><td style="text-align:right"><button class="btn-success" onclick="approve('${u.id}')">Allow</button><button class="btn-danger" onclick="decline('${u.id}')">Deny</button></td></tr>`;
+        } else if (u.role !== 'declined') {
+            const isOnline = (Date.now() - (u.last_seen || 0)) < 60000;
+            userTable.innerHTML += `<tr><td><div class="status-dot ${isOnline ? 'online' : ''}"></div>${u.username}</td><td style="text-align:right"><button class="btn-danger" onclick="kick('${u.id}')">Kick</button></td></tr>`;
         }
     });
 }
 
-async function syncSystemUI() {
-    const { data: settings } = await supabase.from('system_settings').select('*');
-    const maint = settings.find(s => s.key === 'maintenance')?.value?.enabled;
+async function loadMessages() {
+    const { data } = await supabase.from('messages').select('*').order('time', { ascending: false }).limit(10);
+    const list = document.getElementById("messageList");
+    list.innerHTML = "";
+    data?.forEach(m => {
+        list.innerHTML += `<div class="msg-preview-item"><b>${m.name}:</b> ${m.msg} <br><button class="btn-action" onclick="pinMsg('${m.id}', '${m.msg.replace(/'/g, "\\'")}')">Pin</button></div>`;
+    });
+}
+
+async function syncUI() {
+    const { data } = await supabase.from('system_settings').select('*');
+    const maint = data.find(s => s.key === 'maintenance')?.value?.enabled;
     const btn = document.getElementById("maintBtn");
     btn.innerText = maint ? "DISABLE MAINTENANCE" : "ENABLE MAINTENANCE";
     btn.className = maint ? "btn-success" : "btn-warning";
 
-    const pin = settings.find(s => s.key === 'pin')?.value;
+    const pin = data.find(s => s.key === 'pin')?.value;
     document.getElementById("active-pin").innerText = pin?.msg ? "Current: " + pin.msg : "None";
 }
 
-async function loadMessages() {
-    const { data } = await supabase.from('messages').select('*').order('time', { ascending: false }).limit(20);
-    const list = document.getElementById("messageList");
-    list.innerHTML = "";
-    data?.filter(m => m.type !== 'announcement').forEach(m => {
-        list.innerHTML += `<div class="msg-preview-item">
-            <b>${m.name}:</b> ${m.msg} <br>
-            <button class="btn-action" onclick="pinMsg('${m.id}', '${m.msg.replace(/'/g, "\\'")}')">Pin Message</button>
-        </div>`;
-    });
-}
-
-// --- GLOBALS FOR BUTTONS ---
 window.approve = async (id) => await supabase.from('allowed_users').update({ role: 'user' }).eq('id', id);
 window.decline = async (id) => await supabase.from('allowed_users').update({ role: 'declined' }).eq('id', id);
+window.kick = async (id) => confirm("Kick user?") && await supabase.from('allowed_users').delete().eq('id', id);
 window.toggleMaint = async () => {
     const { data } = await supabase.from('system_settings').select('value').eq('key', 'maintenance').single();
     await supabase.from('system_settings').update({ value: { enabled: !data.value.enabled } }).eq('key', 'maintenance');
 };
 window.pinMsg = async (id, text) => await supabase.from('system_settings').update({ value: { id, msg: text } }).eq('key', 'pin');
 window.unpinMessage = async () => await supabase.from('system_settings').update({ value: { id: "", msg: "" } }).eq('key', 'pin');
-window.makeAdmin = async (id) => confirm("Make Admin?") && await supabase.from('allowed_users').update({ role: 'admin' }).eq('id', id);
-window.renameMember = async (id, old) => {
-    const n = prompt("New name:", old);
-    if(n) await supabase.from('allowed_users').update({ username: n }).eq('id', id);
-};
-window.kickUser = async (id, name) => confirm(`Kick ${name}?`) && await supabase.from('allowed_users').delete().eq('id', id);
-window.banUser = async (id, name) => confirm(`Ban ${name}?`) && await supabase.from('allowed_users').update({ role: 'banned' }).eq('id', id);
-
 window.sendAnn = async () => {
     const m = document.getElementById("ann-msg");
     if(!m.value.trim()) return;
-    await supabase.from('messages').insert([{ 
-        msg: m.value, 
-        name: "SYSTEM", 
-        type: "announcement", 
-        time: new Date().toISOString(),
-        uid: myUser.id 
-    }]);
+    await supabase.from('messages').insert([{ msg: m.value, name: "SYSTEM", type: "announcement", time: new Date().toISOString() }]);
     m.value = "";
-    alert("Broadcasted!");
-};
-
-window.wipeChat = async () => {
-    if(confirm("Wipe all messages?")) {
-        await supabase.from('messages').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-        loadMessages();
-    }
 };
 
 checkAuth();
