@@ -91,66 +91,41 @@ async function checkAuth() {
 
 function initDashboard() {
     setupRealtime();
-    loadMessages();
 }
 
-async function setupRealtime() {
-    // Listen for Settings changes (Maintenance & Pin)
-    supabase.channel('system_updates')
-        .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'system_settings' }, () => {
-            syncSystemUI();
-        })
+function setupRealtime() {
+    // Realtime for User List & Requests
+    supabase.channel('admin_users')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'allowed_users' }, () => loadMembers())
         .subscribe();
 
-    // Listen for User/Request changes
-    supabase.channel('user_updates')
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'allowed_users' }, () => {
-            loadMembers();
-        })
+    // Realtime for Settings
+    supabase.channel('admin_settings')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'system_settings' }, () => syncSystemUI())
         .subscribe();
 
-    // Listen for New Messages (to update pin tool list)
-    supabase.channel('msg_updates')
-        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, () => {
-            loadMessages();
-        })
-        .subscribe();
-
-    // Initial Loads
-    syncSystemUI();
     loadMembers();
-}
-
-async function syncSystemUI() {
-    const { data: settings } = await supabase.from('system_settings').select('*');
-    
-    // Maint UI
-    const maint = settings.find(s => s.key === 'maintenance')?.value?.enabled;
-    const btn = document.getElementById("maintBtn");
-    btn.innerText = maint ? "DISABLE MAINTENANCE" : "ENABLE MAINTENANCE";
-    btn.className = maint ? "btn-success" : "btn-warning";
-
-    // Pin UI
-    const pin = settings.find(s => s.key === 'pin')?.value;
-    const pinDiv = document.getElementById("active-pin");
-    pinDiv.innerText = (pin && pin.msg) ? "Current: " + pin.msg : "None";
+    loadMessages();
+    syncSystemUI();
 }
 
 async function loadMembers() {
     const { data: users } = await supabase.from('allowed_users').select('*');
-    
     const reqTable = document.getElementById("requestTable");
     const userTable = document.getElementById("userTable");
+    
     reqTable.innerHTML = "";
     userTable.innerHTML = "";
 
     users?.forEach(u => {
         if (u.role === 'pending') {
             reqTable.innerHTML += `<tr><td><b>${u.username}</b><span class="uid-label">${u.id}</span></td>
-                <td style="text-align:right"><button class="btn-success" onclick="approve('${u.id}', '${u.username}')">Allow</button>
-                <button class="btn-danger" onclick="decline('${u.id}')">Deny</button></td></tr>`;
-        } else if (u.role !== 'declined') {
-            const isOnline = (Date.now() - (u.last_seen || 0)) < 60000;
+                <td style="text-align:right">
+                    <button class="btn-success" onclick="approve('${u.id}')">Allow</button>
+                    <button class="btn-danger" onclick="decline('${u.id}')">Deny</button>
+                </td></tr>`;
+        } else if (u.role !== 'declined' && u.role !== 'banned') {
+            const isOnline = (Date.now() - (Number(u.last_seen) || 0)) < 60000;
             const isAdmin = u.role === 'admin';
             const isMe = u.id === myUser.id;
             
@@ -164,11 +139,22 @@ async function loadMembers() {
     });
 }
 
+async function syncSystemUI() {
+    const { data: settings } = await supabase.from('system_settings').select('*');
+    const maint = settings.find(s => s.key === 'maintenance')?.value?.enabled;
+    const btn = document.getElementById("maintBtn");
+    btn.innerText = maint ? "DISABLE MAINTENANCE" : "ENABLE MAINTENANCE";
+    btn.className = maint ? "btn-success" : "btn-warning";
+
+    const pin = settings.find(s => s.key === 'pin')?.value;
+    document.getElementById("active-pin").innerText = pin?.msg ? "Current: " + pin.msg : "None";
+}
+
 async function loadMessages() {
-    const { data } = await supabase.from('messages').select('*').neq('type', 'announcement').order('time', { ascending: false }).limit(15);
+    const { data } = await supabase.from('messages').select('*').order('time', { ascending: false }).limit(20);
     const list = document.getElementById("messageList");
     list.innerHTML = "";
-    data?.forEach(m => {
+    data?.filter(m => m.type !== 'announcement').forEach(m => {
         list.innerHTML += `<div class="msg-preview-item">
             <b>${m.name}:</b> ${m.msg} <br>
             <button class="btn-action" onclick="pinMsg('${m.id}', '${m.msg.replace(/'/g, "\\'")}')">Pin Message</button>
@@ -176,72 +162,40 @@ async function loadMessages() {
     });
 }
 
-// --- GLOBAL ACTIONS ---
-
+// --- GLOBALS FOR BUTTONS ---
+window.approve = async (id) => await supabase.from('allowed_users').update({ role: 'user' }).eq('id', id);
+window.decline = async (id) => await supabase.from('allowed_users').update({ role: 'declined' }).eq('id', id);
 window.toggleMaint = async () => {
     const { data } = await supabase.from('system_settings').select('value').eq('key', 'maintenance').single();
-    const currentStatus = data.value.enabled;
-    await supabase.from('system_settings').update({ value: { enabled: !currentStatus } }).eq('key', 'maintenance');
+    await supabase.from('system_settings').update({ value: { enabled: !data.value.enabled } }).eq('key', 'maintenance');
 };
-
-window.approve = async (id, name) => {
-    await supabase.from('allowed_users').update({ role: 'user' }).eq('id', id);
-    loadMembers();
-};
-
-window.decline = async (id) => {
-    await supabase.from('allowed_users').update({ role: 'declined' }).eq('id', id);
-    loadMembers();
-};
-
-window.pinMsg = async (id, text) => {
-    await supabase.from('system_settings').update({ value: { id: id, msg: text } }).eq('key', 'pin');
-};
-
-window.unpinMessage = async () => {
-    await supabase.from('system_settings').update({ value: { id: "", msg: "" } }).eq('key', 'pin');
-};
-
-window.makeAdmin = async (id) => {
-    if(confirm("Promote to Admin?")) await supabase.from('allowed_users').update({ role: "admin" }).eq('id', id);
-};
-
-window.renameMember = async (id, old) => { 
-    const n = prompt("New name for " + old + ":");
+window.pinMsg = async (id, text) => await supabase.from('system_settings').update({ value: { id, msg: text } }).eq('key', 'pin');
+window.unpinMessage = async () => await supabase.from('system_settings').update({ value: { id: "", msg: "" } }).eq('key', 'pin');
+window.makeAdmin = async (id) => confirm("Make Admin?") && await supabase.from('allowed_users').update({ role: 'admin' }).eq('id', id);
+window.renameMember = async (id, old) => {
+    const n = prompt("New name:", old);
     if(n) await supabase.from('allowed_users').update({ username: n }).eq('id', id);
 };
-
-window.kickUser = async (id, name) => {
-    if(confirm("Kick " + name + "?")) await supabase.from('allowed_users').delete().eq('id', id);
-};
-
-window.banUser = async (id, name) => {
-    if(confirm("Ban " + name + " permanently?")) {
-        // In Supabase, usually you'd set a 'banned' role or delete.
-        await supabase.from('allowed_users').update({ role: 'banned' }).eq('id', id);
-    }
-};
+window.kickUser = async (id, name) => confirm(`Kick ${name}?`) && await supabase.from('allowed_users').delete().eq('id', id);
+window.banUser = async (id, name) => confirm(`Ban ${name}?`) && await supabase.from('allowed_users').update({ role: 'banned' }).eq('id', id);
 
 window.sendAnn = async () => {
     const m = document.getElementById("ann-msg");
-    const val = m.value.trim();
-    if(!val) return;
-    // Announcement type allows chat.html to display it specially
+    if(!m.value.trim()) return;
     await supabase.from('messages').insert([{ 
-        msg: val, 
+        msg: m.value, 
         name: "SYSTEM", 
         type: "announcement", 
-        time: new Date().toISOString() 
+        time: new Date().toISOString(),
+        uid: myUser.id 
     }]);
     m.value = "";
-    alert("Announcement Broadcasted!");
+    alert("Broadcasted!");
 };
 
 window.wipeChat = async () => {
-    if(confirm("Permanently wipe ALL messages? This cannot be undone.")) {
-        const { error } = await supabase.from('messages').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-        if(!error) alert("Chat wiped successfully.");
-        else console.error(error);
+    if(confirm("Wipe all messages?")) {
+        await supabase.from('messages').delete().neq('id', '00000000-0000-0000-0000-000000000000');
         loadMessages();
     }
 };
