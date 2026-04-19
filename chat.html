@@ -154,7 +154,7 @@ async function init() {
         document.getElementById("display-name").innerText = myUsername;
         loadMessages();
         setupRealtime();
-        setInterval(heartbeat, 20000); heartbeat();
+        setInterval(heartbeat, 15000); heartbeat();
     }
 }
 
@@ -172,7 +172,6 @@ function setupRealtime() {
         } else if (payload.eventType === 'UPDATE') {
             const el = document.getElementById(`msg-${payload.new.id}`);
             if(el) {
-                // FIXED: We target the specific span with the message class
                 const contentSpan = el.querySelector('.msg-content');
                 if (contentSpan) contentSpan.innerText = payload.new.msg;
                 if(payload.new.edited && !el.querySelector('.edited-tag')) {
@@ -200,9 +199,9 @@ async function updateMemberList() {
     const now = Date.now();
 
     data?.forEach(u => {
-        // Online if active in last 60 seconds
-        if (u.last_seen && (now - parseInt(u.last_seen)) < 60000) {
-            list.innerHTML += `<div class="member-item"><div class="status-dot"></div><span>${u.username}</span></div>`;
+        // Online if active in last 45 seconds (tightened for accuracy)
+        if (u.last_seen && (now - parseInt(u.last_seen)) < 45000) {
+            list.innerHTML += `<div class="member-item"><div class="status-dot"></div><span>${u.username} ${u.id === myUser.id ? '(You)' : ''}</span></div>`;
         }
         if (u.id !== myUser.id && u.is_typing) typers.push(u.username);
     });
@@ -223,8 +222,8 @@ function appendMsg(m, isBulk = false) {
     msgDiv.id = `msg-${m.id}`;
     msgDiv.innerHTML = `
         <div class="msg-actions">
-            <button onclick="startReply('${m.id}', '${m.name}', '${m.msg.replace(/'/g, "\\'")}')">Reply</button>
-            ${isMe ? `<button onclick="startEdit('${m.id}', '${m.msg.replace(/'/g, "\\'")}')">Edit</button>` : ''}
+            <button onclick="startReply('${m.id}', '${m.name}')">Reply</button>
+            ${isMe ? `<button onclick="startEdit('${m.id}')">Edit</button>` : ''}
             ${isMe ? `<button onclick="deleteMsg('${m.id}')" style="color:var(--danger)">Delete</button>` : ''}
         </div>
         ${m.reply_to ? `<div class="reply-preview" onclick="scrollToMessage('${m.reply_to.id}')"><b>${m.reply_to.name}:</b> ${m.reply_to.msg}</div>` : ''}
@@ -238,18 +237,22 @@ function appendMsg(m, isBulk = false) {
     if (!isBulk) chat.scrollTop = chat.scrollHeight;
 }
 
-window.startReply = (id, name, msg) => {
-    currentReply = { id, name, msg: msg.substring(0, 50) };
+window.startReply = (id, name) => {
+    const currentMsgText = document.querySelector(`#msg-${id} .msg-content`).innerText;
+    currentReply = { id, name, msg: currentMsgText.substring(0, 50) };
     document.getElementById("reply-box").style.display = "flex";
     document.getElementById("reply-target-name").innerText = name;
     document.getElementById("msg").focus();
 };
+
 window.cancelReply = () => { currentReply = null; document.getElementById("reply-box").style.display = "none"; };
 
-window.startEdit = (id, oldMsg) => { 
+window.startEdit = (id) => { 
     editingId = id; 
+    // FIXED: Instead of using an old string, we grab what is currently on the screen!
+    const latestText = document.querySelector(`#msg-${id} .msg-content`).innerText;
     const inp = document.getElementById("msg"); 
-    inp.value = oldMsg; 
+    inp.value = latestText; 
     inp.focus(); 
     document.getElementById("sendBtn").innerText = "Update"; 
 };
