@@ -191,13 +191,8 @@ function setupRealtime() {
 }
 
 async function updateMemberList() {
-    // 1. Fetch all users
     const { data, error } = await supabase.from('allowed_users').select('*');
-    
-    if (error) {
-        console.error("Member Fetch Error:", error.message);
-        return;
-    }
+    if (error) return;
 
     const list = document.getElementById("active-list");
     const typingEl = document.getElementById("typing-indicator");
@@ -206,55 +201,38 @@ async function updateMemberList() {
     const now = Date.now();
 
     data?.forEach(u => {
-        // Log to console so you can see if data is actually arriving
-        console.log(`User: ${u.username}, Last Seen: ${u.last_seen}`);
-
-        // Convert last_seen to a number and check if active in last 60 seconds
         const lastActive = Number(u.last_seen);
-        if (lastActive && (now - lastActive) < 60000) {
+        
+        // DEBUG: If lastActive is 0, we show it anyway for now to prove data is there
+        const isOnline = lastActive > 0 && (now - lastActive) < 60000;
+        const isMe = u.id === myUser.id;
+
+        if (isOnline || isMe) { 
             list.innerHTML += `
                 <div class="member-item">
-                    <div class="status-dot"></div>
-                    <span>${u.username} ${u.id === myUser.id ? '(You)' : ''}</span>
+                    <div class="status-dot" style="background: ${isOnline ? 'var(--accent)' : '#555'}"></div>
+                    <span>${u.username} ${isMe ? '(You)' : ''}</span>
                 </div>`;
         }
         
-        if (u.id !== myUser.id && u.is_typing) {
-            typers.push(u.username);
-        }
+        if (u.id !== myUser.id && u.is_typing) typers.push(u.username);
     });
-    
     typingEl.innerText = typers.length > 0 ? typers.join(", ") + " is typing..." : "";
 }
 
-const heartbeat = () => supabase.from('allowed_users').update({ last_seen: Date.now() }).eq('id', myUser.id);
-
-function appendMsg(m, isBulk = false) {
-    if (document.getElementById(`msg-${m.id}`)) return;
-    const chat = document.getElementById("chat");
-    const isMe = m.uid === myUser.id;
-    const align = isMe ? 'my-msg' : 'other-msg';
-    const timeStr = new Date(m.time).toLocaleTimeString('en-US', { timeZone: 'Asia/Dhaka', hour: '2-digit', minute: '2-digit', hour12: true });
-
-    const msgDiv = document.createElement('div');
-    msgDiv.className = `msg-container ${align}`;
-    msgDiv.id = `msg-${m.id}`;
-    msgDiv.innerHTML = `
-        <div class="msg-actions">
-            <button onclick="startReply('${m.id}', '${m.name}')">Reply</button>
-            ${isMe ? `<button onclick="startEdit('${m.id}')">Edit</button>` : ''}
-            ${isMe ? `<button onclick="deleteMsg('${m.id}')" style="color:var(--danger)">Delete</button>` : ''}
-        </div>
-        ${m.reply_to ? `<div class="reply-preview" onclick="scrollToMessage('${m.reply_to.id}')"><b>${m.reply_to.name}:</b> ${m.reply_to.msg}</div>` : ''}
-        <p class="msg-line">
-            <span class="name">${m.name}<span class="timestamp">${timeStr}</span>:</span>
-            <span class="msg-content">${m.msg}</span>
-            ${m.edited ? '<span class="edited-tag">(edited)</span>' : ''}
-        </p>
-    `;
-    chat.appendChild(msgDiv);
-    if (!isBulk) chat.scrollTop = chat.scrollHeight;
-}
+const heartbeat = async () => {
+    const now = Date.now();
+    const { error } = await supabase
+        .from('allowed_users')
+        .update({ last_seen: now })
+        .eq('id', myUser.id);
+    
+    if (error) {
+        console.error("Heartbeat Failed:", error.message);
+    } else {
+        console.log("Heartbeat Sent:", now);
+    }
+};
 
 window.startReply = (id, name) => {
     const currentMsgText = document.querySelector(`#msg-${id} .msg-content`).innerText;
