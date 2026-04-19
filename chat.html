@@ -111,6 +111,7 @@ let isCooldown = false;
 let myUsername = "";
 let myUser = null;
 
+// --- 1. UTILITY FUNCTIONS ---
 window.toggleDrawer = () => document.getElementById('member-drawer').classList.toggle('open');
 window.scrollToMessage = (id) => {
     const el = document.getElementById(`msg-${id}`);
@@ -134,6 +135,86 @@ const checkSpam = () => {
     return false;
 };
 
+// --- 2. CORE CHAT FUNCTIONS (Defined before they are called) ---
+
+function appendMsg(m, isBulk = false) {
+    if (document.getElementById(`msg-${m.id}`)) return;
+    const chat = document.getElementById("chat");
+    const isMe = m.uid === myUser.id;
+    const align = isMe ? 'my-msg' : 'other-msg';
+    const timeStr = new Date(m.time).toLocaleTimeString('en-US', { timeZone: 'Asia/Dhaka', hour: '2-digit', minute: '2-digit', hour12: true });
+
+    const msgDiv = document.createElement('div');
+    msgDiv.className = `msg-container ${align}`;
+    msgDiv.id = `msg-${m.id}`;
+    msgDiv.innerHTML = `
+        <div class="msg-actions">
+            <button onclick="startReply('${m.id}', '${m.name}')">Reply</button>
+            ${isMe ? `<button onclick="startEdit('${m.id}')">Edit</button>` : ''}
+            ${isMe ? `<button onclick="deleteMsg('${m.id}')" style="color:var(--danger)">Delete</button>` : ''}
+        </div>
+        ${m.reply_to ? `<div class="reply-preview" onclick="scrollToMessage('${m.reply_to.id}')"><b>${m.reply_to.name}:</b> ${m.reply_to.msg}</div>` : ''}
+        <p class="msg-line">
+            <span class="name">${m.name}<span class="timestamp">${timeStr}</span>:</span>
+            <span class="msg-content">${m.msg}</span>
+            ${m.edited ? '<span class="edited-tag">(edited)</span>' : ''}
+        </p>
+    `;
+    chat.appendChild(msgDiv);
+    if (!isBulk) chat.scrollTop = chat.scrollHeight;
+}
+
+const heartbeat = () => {
+    supabase.from('allowed_users').update({ last_seen: Date.now() }).eq('id', myUser.id)
+    .then(({error}) => { if(!error) console.log("Heartbeat Sent:", Date.now()); });
+};
+
+async function updateMemberList() {
+    const { data } = await supabase.from('allowed_users').select('*');
+    const list = document.getElementById("active-list");
+    const typingEl = document.getElementById("typing-indicator");
+    list.innerHTML = ""; 
+    let typers = [];
+    const now = Date.now();
+
+    data?.forEach(u => {
+        const lastActive = Number(u.last_seen);
+        // FIXED LOGIC: Show as online if seen in last 60s OR if it's the current user
+        if ((lastActive && (now - lastActive) < 60000) || u.id === myUser.id) {
+            list.innerHTML += `<div class="member-item"><div class="status-dot"></div><span>${u.username} ${u.id === myUser.id ? '(You)' : ''}</span></div>`;
+        }
+        if (u.id !== myUser.id && u.is_typing) typers.push(u.username);
+    });
+    typingEl.innerText = typers.length > 0 ? typers.join(", ") + " is typing..." : "";
+}
+
+// --- 3. SYSTEM INITIALIZATION ---
+
+async function loadMessages() {
+    const { data } = await supabase.from('messages').select('*').order('time', { ascending: true }).limit(50);
+    if(data) data.forEach(m => appendMsg(m, true));
+}
+
+function setupRealtime() {
+    supabase.channel('room1')
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'messages' }, payload => {
+        if (payload.eventType === 'INSERT') appendMsg(payload.new);
+        else if (payload.eventType === 'UPDATE') {
+            const el = document.getElementById(`msg-${payload.new.id}`);
+            if(el) {
+                el.querySelector('.msg-content').innerText = payload.new.msg;
+                if(payload.new.edited && !el.querySelector('.edited-tag')) {
+                    el.querySelector('.msg-line').insertAdjacentHTML('beforeend', `<span class="edited-tag">(edited)</span>`);
+                }
+            }
+        }
+        else if (payload.eventType === 'DELETE') document.getElementById(`msg-${payload.old.id}`)?.remove();
+    })
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'allowed_users' }, () => updateMemberList())
+    .subscribe();
+    updateMemberList();
+}
+
 async function init() {
     let { data: { session } } = await supabase.auth.getSession();
     if (!session) { const { data } = await supabase.auth.signInAnonymously(); session = data.session; }
@@ -152,145 +233,43 @@ async function init() {
         document.getElementById("request-screen").style.display = "none";
         document.getElementById("app").style.display = "flex";
         document.getElementById("display-name").innerText = myUsername;
-        loadMessages();
+        await loadMessages();
         setupRealtime();
-        setInterval(heartbeat, 15000); heartbeat();
+        setInterval(heartbeat, 15000); 
+        heartbeat();
     }
 }
 
-async function loadMessages() {
-    const { data } = await supabase.from('messages').select('*').order('time', { ascending: true }).limit(50);
-    if(data) data.forEach(m => appendMsg(m, true));
-}
-
-function setupRealtime() {
-    supabase.channel('room1')
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'messages' }, payload => {
-        if (payload.eventType === 'INSERT') {
-            appendMsg(payload.new);
-            if (document.hidden && payload.new.uid !== myUser.id) document.getElementById("msg-sound").play();
-        } else if (payload.eventType === 'UPDATE') {
-            const el = document.getElementById(`msg-${payload.new.id}`);
-            if(el) {
-                const contentSpan = el.querySelector('.msg-content');
-                if (contentSpan) contentSpan.innerText = payload.new.msg;
-                if(payload.new.edited && !el.querySelector('.edited-tag')) {
-                    el.querySelector('.msg-line').insertAdjacentHTML('beforeend', `<span class="edited-tag">(edited)</span>`);
-                }
-            }
-        } else if (payload.eventType === 'DELETE') {
-            document.getElementById(`msg-${payload.old.id}`)?.remove();
-        }
-    })
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'allowed_users' }, () => {
-        updateMemberList();
-    })
-    .subscribe();
-    
-    updateMemberList();
-}
-
-async function updateMemberList() {
-    const { data, error } = await supabase.from('allowed_users').select('*');
-    if (error) return;
-
-    const list = document.getElementById("active-list");
-    const typingEl = document.getElementById("typing-indicator");
-    list.innerHTML = ""; 
-    let typers = [];
-    const now = Date.now();
-
-    data?.forEach(u => {
-        const lastActive = Number(u.last_seen);
-        
-        // DEBUG: If lastActive is 0, we show it anyway for now to prove data is there
-        const isOnline = lastActive > 0 && (now - lastActive) < 60000;
-        const isMe = u.id === myUser.id;
-
-        if (isOnline || isMe) { 
-            list.innerHTML += `
-                <div class="member-item">
-                    <div class="status-dot" style="background: ${isOnline ? 'var(--accent)' : '#555'}"></div>
-                    <span>${u.username} ${isMe ? '(You)' : ''}</span>
-                </div>`;
-        }
-        
-        if (u.id !== myUser.id && u.is_typing) typers.push(u.username);
-    });
-    typingEl.innerText = typers.length > 0 ? typers.join(", ") + " is typing..." : "";
-}
-
-const heartbeat = async () => {
-    const now = Date.now();
-    const { error } = await supabase
-        .from('allowed_users')
-        .update({ last_seen: now })
-        .eq('id', myUser.id);
-    
-    if (error) {
-        console.error("Heartbeat Failed:", error.message);
-    } else {
-        console.log("Heartbeat Sent:", now);
-    }
-};
+// --- 4. EVENT LISTENERS ---
 
 window.startReply = (id, name) => {
-    const currentMsgText = document.querySelector(`#msg-${id} .msg-content`).innerText;
-    currentReply = { id, name, msg: currentMsgText.substring(0, 50) };
+    const txt = document.querySelector(`#msg-${id} .msg-content`).innerText;
+    currentReply = { id, name, msg: txt.substring(0, 50) };
     document.getElementById("reply-box").style.display = "flex";
     document.getElementById("reply-target-name").innerText = name;
     document.getElementById("msg").focus();
 };
-
 window.cancelReply = () => { currentReply = null; document.getElementById("reply-box").style.display = "none"; };
-
 window.startEdit = (id) => { 
     editingId = id; 
-    // FIXED: Instead of using an old string, we grab what is currently on the screen!
-    const latestText = document.querySelector(`#msg-${id} .msg-content`).innerText;
-    const inp = document.getElementById("msg"); 
-    inp.value = latestText; 
-    inp.focus(); 
+    document.getElementById("msg").value = document.querySelector(`#msg-${id} .msg-content`).innerText;
+    document.getElementById("msg").focus();
     document.getElementById("sendBtn").innerText = "Update"; 
 };
-
-window.deleteMsg = async (id) => { 
-    if(confirm("Delete?")) await supabase.from('messages').delete().eq('id', id); 
-};
+window.deleteMsg = async (id) => { if(confirm("Delete?")) await supabase.from('messages').delete().eq('id', id); };
 
 document.getElementById("sendBtn").onclick = async () => {
     const inp = document.getElementById("msg");
     const val = inp.value.trim();
     if(!val || isCooldown || checkSpam()) return;
-
     if(editingId) {
         await supabase.from('messages').update({ msg: val, edited: true }).eq('id', editingId);
-        editingId = null; 
-        document.getElementById("sendBtn").innerText = "Send Message";
+        editingId = null; document.getElementById("sendBtn").innerText = "Send Message";
     } else {
         await supabase.from('messages').insert([{ uid: myUser.id, name: myUsername, msg: val, reply_to: currentReply }]);
     }
     inp.value = ""; cancelReply();
-    await supabase.from('allowed_users').update({ is_typing: false }).eq('id', myUser.id);
 };
-
-document.getElementById("nameBtn").onclick = async () => {
-    const n = prompt("New Nickname:");
-    if(n) { await supabase.from('allowed_users').update({ username: n }).eq('id', myUser.id); location.reload(); }
-};
-
-document.getElementById("reqBtn").onclick = async () => {
-    const n = document.getElementById("req-name").value.trim();
-    if(n) { await supabase.from('allowed_users').insert([{ id: myUser.id, username: n, role: 'pending' }]); document.getElementById("req-status").innerText = "⏳ Sent!"; }
-};
-
-let tto;
-document.getElementById("msg").oninput = () => {
-    supabase.from('allowed_users').update({ is_typing: true }).eq('id', myUser.id);
-    clearTimeout(tto); tto = setTimeout(() => supabase.from('allowed_users').update({ is_typing: false }).eq('id', myUser.id), 2000);
-};
-
-document.getElementById("msg").onkeydown = (e) => { if(e.key === "Enter" && !e.shiftKey) { e.preventDefault(); document.getElementById("sendBtn").click(); } };
 
 init();
 </script>
