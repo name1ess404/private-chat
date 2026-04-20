@@ -8,6 +8,7 @@
         :root { --bg: #0d1117; --card: #161b22; --text: #c9d1d9; --accent: #238636; --border: #30363d; --user-color: #f0f6fc; --danger: #da3633; --warning: #d29922; --reply-bg: #21262d; }
         * { box-sizing: border-box; -webkit-font-smoothing: antialiased; }
         
+        /* Fixed position body to prevent Instagram scroll-bounce */
         body { background: var(--bg); color: var(--text); font-family: 'Inter', sans-serif; margin: 0; display: flex; flex-direction: column; justify-content: center; align-items: center; height: 100dvh; overflow: hidden; position: fixed; width: 100%; }
         
         #app, #request-screen { width: 100%; max-width: 600px; height: 92dvh; display: none; flex-direction: column; background: var(--card); border: 1px solid var(--border); border-radius: 12px; position: relative; margin: 10px; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
@@ -41,6 +42,7 @@
         .other-msg .msg-actions { left: 5px; }
         .msg-actions button { padding: 2px 8px; font-size: 0.7rem; background: none; border: none; color: #8b949e; cursor: pointer; }
         
+        /* Smooth transform for keyboard lifting */
         .input-area { padding: 16px; border-top: 1px solid var(--border); background: var(--card); flex-shrink: 0; padding-bottom: max(16px, env(safe-area-inset-bottom)); width: 100%; transition: transform 0.1s ease-out; }
         textarea { width: 100%; background: var(--bg); border: 1px solid var(--border); color: var(--text); padding: 12px; border-radius: 8px; outline: none; resize: none; font-size: 16px; appearance: none; }
         
@@ -132,7 +134,6 @@ let lastMsgTime = 0;
 let isCooldown = false;
 let myUsername = "";
 let myUser = null;
-let myRole = 'user';
 let typingTimeout = null;
 
 // --- DYNAMIC VIEWPORT FIX FOR INSTAGRAM ---
@@ -147,7 +148,7 @@ if (window.visualViewport) {
         const h = window.visualViewport.height;
         const offset = window.innerHeight - h;
         
-        if (offset > 50) { 
+        if (offset > 50) { // Keyboard is likely open
             inputArea.style.transform = `translateY(-${offset}px)`;
             setTimeout(syncChatScroll, 100);
         } else {
@@ -159,7 +160,6 @@ if (window.visualViewport) {
 // --- UTILITIES ---
 window.toggleDrawer = () => document.getElementById('member-drawer').classList.toggle('open');
 window.scrollToMessage = (id) => {
-    if(!id) return;
     const el = document.getElementById(`msg-${id}`);
     if(el) {
         el.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -190,7 +190,6 @@ function appendMsg(m, isBulk = false) {
     
     const chat = document.getElementById("chat");
     const isMe = m.uid === myUser.id;
-    const isAnn = m.type === 'announcement';
     const align = isMe ? 'my-msg' : 'other-msg';
     const timeStr = new Date(m.time).toLocaleTimeString('en-US', { timeZone: 'Asia/Dhaka', hour: '2-digit', minute: '2-digit', hour12: true });
 
@@ -198,11 +197,6 @@ function appendMsg(m, isBulk = false) {
 
     const msgDiv = document.createElement('div');
     msgDiv.className = `msg-container ${align}`;
-    if(isAnn) msgDiv.style.background = "rgba(210, 153, 34, 0.15)";
-    if(isAnn) msgDiv.style.border = "1px solid var(--warning)";
-    if(isAnn) msgDiv.style.width = "100%";
-    if(isAnn) msgDiv.style.maxWidth = "100%";
-
     msgDiv.id = `msg-${m.id}`;
     msgDiv.innerHTML = `
         <div class="msg-actions">
@@ -212,7 +206,7 @@ function appendMsg(m, isBulk = false) {
         </div>
         ${m.reply_to ? `<div class="reply-preview" data-replying-to="${m.reply_to.id}" onclick="scrollToMessage('${m.reply_to.id}')"><b>${m.reply_to.name}:</b> <span class="reply-text">${m.reply_to.msg}</span></div>` : ''}
         <p class="msg-line">
-            <span class="name" style="${isAnn ? 'color:var(--warning)' : ''}">${m.name}<span class="timestamp">${timeStr}</span>:</span>
+            <span class="name">${m.name}<span class="timestamp">${timeStr}</span>:</span>
             <span class="msg-content">${m.msg}</span>
             <span class="edit-status">${m.edited ? '<span style="font-size: 0.7rem; opacity: 0.5; font-style: italic; margin-left: 5px;">(edited)</span>' : ''}</span>
         </p>
@@ -282,37 +276,6 @@ async function updateMemberList() {
     typingEl.innerText = typers.length > 0 ? typers.join(", ") + " is typing..." : "";
 }
 
-// --- NEW: SYSTEM SETTINGS SYNC ---
-async function syncSystemSettings() {
-    const { data } = await supabase.from('system_settings').select('*');
-    if(!data) return;
-
-    const maint = data.find(s => s.key === 'maintenance')?.value?.enabled;
-    const pin = data.find(s => s.key === 'pin')?.value;
-
-    // Maintenance UI
-    const fields = document.getElementById("input-fields");
-    const overlay = document.getElementById("maint-overlay");
-    if(maint && myRole !== 'admin') {
-        fields.style.display = "none";
-        overlay.style.display = "block";
-    } else {
-        fields.style.display = "block";
-        overlay.style.display = "none";
-    }
-
-    // Pinned Message UI
-    const pinBar = document.getElementById("pinned-container");
-    const pinTxt = document.getElementById("pinned-text");
-    if(pin && pin.msg) {
-        pinBar.style.display = "flex";
-        pinTxt.innerText = pin.msg;
-        pinBar.dataset.targetId = pin.id;
-    } else {
-        pinBar.style.display = "none";
-    }
-}
-
 document.getElementById("reqBtn").onclick = async () => {
     const name = document.getElementById("req-name").value.trim();
     if (!name) return alert("Enter a nickname");
@@ -332,8 +295,6 @@ async function markAsSeen(messageId, seenByArray) {
 
 async function loadMessages() {
     const { data } = await supabase.from('messages').select('*').order('time', { ascending: false }).limit(50);
-    const chat = document.getElementById("chat");
-    chat.innerHTML = ""; // Clear for wipe support
     if(data) { data.reverse().forEach(m => appendMsg(m, true)); }
     syncChatScroll();
 }
@@ -354,12 +315,9 @@ function setupRealtime() {
                 }
             } else if (payload.eventType === 'DELETE') {
                 document.getElementById(`msg-${payload.old.id}`)?.remove();
-                // If it's a mass delete, reload to be sure
-                if(!payload.old.id) loadMessages();
             }
         })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'allowed_users' }, () => { updateMemberList(); })
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'system_settings' }, () => { syncSystemSettings(); })
         .subscribe();
 }
 
@@ -376,12 +334,10 @@ async function init() {
         document.getElementById("my-id-display").innerText = myUser.id;
     } else {
         myUsername = profile.username;
-        myRole = profile.role;
         document.getElementById("request-screen").style.display = "none";
         document.getElementById("app").style.display = "flex";
         document.getElementById("display-name").innerText = myUsername;
         await loadMessages();
-        await syncSystemSettings();
         setupRealtime();
         setInterval(heartbeat, 15000); 
         heartbeat();
@@ -447,7 +403,7 @@ document.getElementById("sendBtn").onclick = async () => {
         editingId = null; 
         document.getElementById("sendBtn").innerText = "Send Message";
     } else {
-        await supabase.from('messages').insert([{ uid: myUser.id, name: myUsername, msg: val, reply_to: currentReply, seen_by: [myUsername], time: new Date().toISOString() }]);
+        await supabase.from('messages').insert([{ uid: myUser.id, name: myUsername, msg: val, reply_to: currentReply, seen_by: [myUsername] }]);
     }
     inp.value = ""; 
     setTyping(false);
