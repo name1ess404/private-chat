@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+s<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -231,33 +231,46 @@ async function loadMessages() {
 function setupRealtime() {
     console.log("Setting up Unified Realtime...");
 
-    const channel = supabase.channel('main_room', {
-        config: {
-            ack: true // Force acknowledgement of the connection
-        }
-    })
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'messages' }, payload => {
-        if (payload.eventType === 'INSERT') {
-            if (!document.getElementById(`msg-${payload.new.id}`)) {
-                appendMsg(payload.new);
+    // We use a simpler channel name 'db-changes'
+    const channel = supabase.channel('db-changes')
+        .on('postgres_changes', { 
+            event: '*', 
+            schema: 'public', 
+            table: 'messages' 
+        }, payload => {
+            console.log("Realtime Msg:", payload.eventType, payload.new);
+            if (payload.eventType === 'INSERT') {
+                if (!document.getElementById(`msg-${payload.new.id}`)) {
+                    appendMsg(payload.new);
+                }
+            } else if (payload.eventType === 'UPDATE') {
+                const el = document.getElementById(`msg-${payload.new.id}`);
+                if (el) {
+                    el.querySelector('.msg-content').innerText = payload.new.msg;
+                    // Update reply previews if this msg was a reply target
+                    document.querySelectorAll(`[data-replying-to="${payload.new.id}"] .reply-text`).forEach(prev => {
+                        prev.innerText = payload.new.msg.substring(0, 50);
+                    });
+                }
+            } else if (payload.eventType === 'DELETE') {
+                document.getElementById(`msg-${payload.old.id}`)?.remove();
             }
-        }
-        // ... (Keep your UPDATE and DELETE logic here)
-    })
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'allowed_users' }, () => {
-        updateMemberList();
-    })
-    .subscribe(async (status) => {
-        console.log("CONNECTION STATUS:", status);
-        if (status === 'CHANNEL_ERROR') {
-            console.log("Realtime failed. Retrying in 3s...");
-            setTimeout(setupRealtime, 3000);
-        }
-        if (status === 'SUBSCRIBED') {
-            // Force a refresh of the UI once we are back online
+        })
+        .on('postgres_changes', { 
+            event: '*', 
+            schema: 'public', 
+            table: 'allowed_users' 
+        }, payload => {
+            console.log("User table changed!");
             updateMemberList();
-        }
-    });
+        })
+        .subscribe(async (status) => {
+            console.log("CONNECTION STATUS:", status);
+            if (status === 'SUBSCRIBED') {
+                // If we successfully connect, do an immediate sync to be safe
+                updateMemberList();
+            }
+        });
 }
 
 async function init() {
