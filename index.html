@@ -21,27 +21,35 @@
         .msg-line { margin: 0; line-height: 1.5; font-size: 0.95rem; word-wrap: break-word; }
         .name { color: #58a6ff; font-weight: 700; margin-right: 6px; }
         .timestamp { font-size: 0.72rem; opacity: 0.4; margin-left: 8px; }
-        .edited-tag { font-size: 0.7rem; opacity: 0.5; font-style: italic; margin-left: 5px; }
         .reply-preview { background: var(--reply-bg); border-left: 3px solid var(--accent); padding: 5px 10px; margin-bottom: 5px; border-radius: 4px; font-size: 0.8rem; cursor: pointer; opacity: 0.8; text-align: left; }
         .replying-now-ui { background: var(--reply-bg); padding: 10px; border-top: 1px solid var(--border); display: none; justify-content: space-between; align-items: center; }
         .msg-actions { opacity: 0; position: absolute; top: -15px; background: var(--card); border: 1px solid var(--border); border-radius: 4px; padding: 2px; z-index: 5; }
+        .msg-container:hover .msg-actions { opacity: 1; }
         .my-msg .msg-actions { right: 5px; }
         .other-msg .msg-actions { left: 5px; }
-        .msg-container:hover .msg-actions { opacity: 1; }
         .msg-actions button { padding: 2px 8px; font-size: 0.7rem; background: none; border: none; color: #8b949e; cursor: pointer; }
         .input-area { padding: 16px; border-top: 1px solid var(--border); background: var(--card); }
         textarea { width: 100%; background: var(--bg); border: 1px solid var(--border); color: var(--text); padding: 12px; border-radius: 8px; outline: none; resize: none; font-size: 16px; }
         .controls { display: flex; justify-content: space-between; align-items: center; margin-top: 10px; }
         #cooldown-txt { color: var(--danger); font-size: 0.8rem; font-weight: 600; display: none; }
-        .announcement { background: rgba(31, 111, 235, 0.1); border: 1px solid #1f6feb; padding: 12px; margin: 8px 0; border-radius: 8px; text-align: center; font-style: italic; color: #58a6ff; font-size: 0.85rem; width: 100%; }
         #typing-indicator { height: 22px; padding: 0 20px; font-size: 0.8rem; color: var(--accent); font-weight: 500; }
         #member-drawer { position: absolute; top: 0; right: -100%; width: 280px; height: 100%; background: #0d1117; border-left: 1px solid var(--border); transition: right 0.3s ease; z-index: 100; display: flex; flex-direction: column; }
         #member-drawer.open { right: 0; }
         .drawer-header { padding: 20px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; font-weight: 600; }
         .member-item { display: flex; align-items: center; gap: 12px; padding: 10px 20px; font-size: 0.9rem; }
         .status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
-        .footer-credits { font-size: 0.65rem; opacity: 0.4; letter-spacing: 3px; margin-top: 10px; text-transform: uppercase; font-weight: 700; }
+        .footer-credits { font-size: 0.65rem; opacity: 0.4; letter-spacing: 3px; margin-top: 10px; text-transform: uppercase; font-weight: 700; text-align: center; width: 100%; }
         #maint-overlay { display: none; text-align: center; padding: 15px; color: var(--warning); font-weight: 600; background: rgba(210, 153, 34, 0.1); border-radius: 8px; border: 1px dashed var(--warning); }
+        
+        /* Seen UI Features */
+        .seen-wrapper { position: relative; display: inline-block; cursor: pointer; user-select: none; margin-top: 2px; }
+        .seen-tooltip { 
+            display: none; position: absolute; bottom: 20px; right: 0; 
+            background: #161b22; border: 1px solid var(--border); padding: 5px 10px; 
+            border-radius: 4px; font-size: 0.75rem; white-space: nowrap; z-index: 100; box-shadow: 0 4px 12px rgba(0,0,0,0.5); 
+        }
+        .seen-wrapper:hover .seen-tooltip { display: block; }
+        .seen-tooltip.active { display: block; }
     </style>
 </head>
 <body>
@@ -110,6 +118,7 @@ let lastMsgTime = 0;
 let isCooldown = false;
 let myUsername = "";
 let myUser = null;
+let typingTimeout = null;
 
 // --- UTILITIES ---
 window.toggleDrawer = () => document.getElementById('member-drawer').classList.toggle('open');
@@ -139,8 +148,7 @@ const checkSpam = () => {
 
 function appendMsg(m, isBulk = false) {
     if (document.getElementById(`msg-${m.id}`)) {
-        const seenEl = document.getElementById(`seen-${m.id}`);
-        if(seenEl && m.seen_by) seenEl.innerText = m.seen_by.length > 0 ? "👁️ " + m.seen_by.join(", ") : "";
+        updateSeenUI(m.id, m.seen_by);
         return;
     }
     
@@ -164,19 +172,51 @@ function appendMsg(m, isBulk = false) {
         <p class="msg-line">
             <span class="name">${m.name}<span class="timestamp">${timeStr}</span>:</span>
             <span class="msg-content">${m.msg}</span>
-            ${m.edited ? '<span class="edited-tag">(edited)</span>' : ''}
+            <span class="edit-status">${m.edited ? '<span class="edited-tag" style="font-size: 0.7rem; opacity: 0.5; font-style: italic; margin-left: 5px;">(edited)</span>' : ''}</span>
         </p>
-        <div id="seen-${m.id}" style="font-size: 0.6rem; opacity: 0.4; margin-top: 2px;">
-            ${m.seen_by && m.seen_by.length > 0 ? "👁️ " + m.seen_by.join(", ") : ""}
+        <div class="seen-wrapper" onclick="toggleSeen(event, '${m.id}')">
+            <span id="seen-count-${m.id}" style="font-size: 0.65rem; opacity: 0.6;"></span>
+            <div id="seen-list-${m.id}" class="seen-tooltip"></div>
         </div>
     `;
     chat.appendChild(msgDiv);
+    updateSeenUI(m.id, m.seen_by);
     if (!isBulk) chat.scrollTop = chat.scrollHeight;
 }
+
+function updateSeenUI(id, seenBy) {
+    const countEl = document.getElementById(`seen-count-${id}`);
+    const listEl = document.getElementById(`seen-list-${id}`);
+    if (!countEl || !listEl) return;
+    if (seenBy && seenBy.length > 0) {
+        countEl.innerText = `👁️ ${seenBy.length}`;
+        listEl.innerText = seenBy.join(", ");
+    } else {
+        countEl.innerText = "";
+        listEl.innerText = "";
+    }
+}
+
+window.toggleSeen = (e, id) => {
+    e.stopPropagation();
+    const tooltip = document.getElementById(`seen-list-${id}`);
+    if (!tooltip) return;
+    const isActive = tooltip.classList.contains('active');
+    document.querySelectorAll('.seen-tooltip').forEach(el => el.classList.remove('active'));
+    if (!isActive) tooltip.classList.add('active');
+};
+
+document.addEventListener('click', () => {
+    document.querySelectorAll('.seen-tooltip').forEach(el => el.classList.remove('active'));
+});
 
 const heartbeat = () => {
     supabase.from('allowed_users').update({ last_seen: Date.now() }).eq('id', myUser.id).then(() => {});
 };
+
+async function setTyping(status) {
+    await supabase.from('allowed_users').update({ is_typing: status }).eq('id', myUser.id);
+}
 
 async function updateMemberList() {
     const { data } = await supabase.from('allowed_users').select('*');
@@ -219,8 +259,6 @@ async function markAsSeen(messageId, seenByArray) {
     }
 }
 
-setInterval(updateMemberList, 30000);
-
 async function loadMessages() {
     const { data } = await supabase.from('messages').select('*').order('time', { ascending: true }).limit(50);
     if(data) data.forEach(m => appendMsg(m, true));
@@ -230,24 +268,21 @@ async function loadMessages() {
 
 function setupRealtime() {
     console.log("Setting up Unified Realtime...");
-
-    // We use a simpler channel name 'db-changes'
-    const channel = supabase.channel('db-changes')
-        .on('postgres_changes', { 
-            event: '*', 
-            schema: 'public', 
-            table: 'messages' 
-        }, payload => {
-            console.log("Realtime Msg:", payload.eventType, payload.new);
+    const channelId = 'room_' + Math.random().toString(36).substr(2, 9);
+    
+    supabase.channel(channelId)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'messages' }, payload => {
             if (payload.eventType === 'INSERT') {
-                if (!document.getElementById(`msg-${payload.new.id}`)) {
-                    appendMsg(payload.new);
-                }
+                if (!document.getElementById(`msg-${payload.new.id}`)) appendMsg(payload.new);
             } else if (payload.eventType === 'UPDATE') {
                 const el = document.getElementById(`msg-${payload.new.id}`);
                 if (el) {
                     el.querySelector('.msg-content').innerText = payload.new.msg;
-                    // Update reply previews if this msg was a reply target
+                    const editArea = el.querySelector('.edit-status');
+                    if (payload.new.edited) {
+                        editArea.innerHTML = '<span class="edited-tag" style="font-size: 0.7rem; opacity: 0.5; font-style: italic; margin-left: 5px;">(edited)</span>';
+                    }
+                    updateSeenUI(payload.new.id, payload.new.seen_by);
                     document.querySelectorAll(`[data-replying-to="${payload.new.id}"] .reply-text`).forEach(prev => {
                         prev.innerText = payload.new.msg.substring(0, 50);
                     });
@@ -256,21 +291,10 @@ function setupRealtime() {
                 document.getElementById(`msg-${payload.old.id}`)?.remove();
             }
         })
-        .on('postgres_changes', { 
-            event: '*', 
-            schema: 'public', 
-            table: 'allowed_users' 
-        }, payload => {
-            console.log("User table changed!");
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'allowed_users' }, () => {
             updateMemberList();
         })
-        .subscribe(async (status) => {
-            console.log("CONNECTION STATUS:", status);
-            if (status === 'SUBSCRIBED') {
-                // If we successfully connect, do an immediate sync to be safe
-                updateMemberList();
-            }
-        });
+        .subscribe();
 }
 
 async function init() {
@@ -278,10 +302,8 @@ async function init() {
     if (!session) { const { data } = await supabase.auth.signInAnonymously(); session = data.session; }
     if (!session) return;
     myUser = session.user;
-    
     const { data: profile } = await supabase.from('allowed_users').select('*').eq('id', myUser.id).single();
     document.getElementById("status").style.display = "none";
-
     if (!profile) {
         document.getElementById("app").style.display = "none";
         document.getElementById("request-screen").style.display = "flex";
@@ -300,6 +322,12 @@ async function init() {
 
 // --- EVENTS ---
 
+document.getElementById("msg").oninput = () => {
+    if (!typingTimeout) setTyping(true);
+    clearTimeout(typingTimeout);
+    typingTimeout = setTimeout(() => { setTyping(false); typingTimeout = null; }, 3000);
+};
+
 window.startReply = (id, name) => {
     const txt = document.querySelector(`#msg-${id} .msg-content`).innerText;
     currentReply = { id, name, msg: txt.substring(0, 50) };
@@ -316,12 +344,11 @@ window.startEdit = (id) => {
 };
 window.deleteMsg = async (id) => { if(confirm("Delete?")) await supabase.from('messages').delete().eq('id', id); };
 
-// FIX FOR NICKNAME BUTTON
 document.getElementById("nameBtn").onclick = async () => {
     const newName = prompt("Enter your new nickname:", myUsername);
     if (newName && newName.trim() !== "" && newName !== myUsername) {
         const { error } = await supabase.from('allowed_users').update({ username: newName.trim() }).eq('id', myUser.id);
-        if (error) alert("Error updating name: " + error.message);
+        if (error) alert("Error: " + error.message);
         else {
             myUsername = newName.trim();
             document.getElementById("display-name").innerText = myUsername;
@@ -334,7 +361,6 @@ document.getElementById("sendBtn").onclick = async () => {
     const inp = document.getElementById("msg");
     const val = inp.value.trim();
     if(!val || isCooldown || checkSpam()) return;
-
     if(editingId) {
         await supabase.from('messages').update({ msg: val, edited: true }).eq('id', editingId);
         editingId = null; 
@@ -343,6 +369,7 @@ document.getElementById("sendBtn").onclick = async () => {
         await supabase.from('messages').insert([{ uid: myUser.id, name: myUsername, msg: val, reply_to: currentReply }]);
     }
     inp.value = ""; 
+    setTyping(false);
     cancelReply();
 };
 init();
