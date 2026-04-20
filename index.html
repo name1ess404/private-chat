@@ -2,14 +2,13 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content">
     <title>Private Chat</title>
     <style>
         :root { --bg: #0d1117; --card: #161b22; --text: #c9d1d9; --accent: #238636; --border: #30363d; --user-color: #f0f6fc; --danger: #da3633; --warning: #d29922; --reply-bg: #21262d; }
         * { box-sizing: border-box; -webkit-font-smoothing: antialiased; }
         
-        /* Fixed height using dvh for mobile keyboard compatibility */
-        body { background: var(--bg); color: var(--text); font-family: 'Inter', sans-serif; margin: 0; display: flex; flex-direction: column; justify-content: center; align-items: center; height: 100vh; height: 100dvh; overflow: hidden; position: fixed; width: 100%; }
+        body { background: var(--bg); color: var(--text); font-family: 'Inter', sans-serif; margin: 0; display: flex; flex-direction: column; justify-content: center; align-items: center; height: 100dvh; overflow: hidden; }
         
         #app, #request-screen { width: 100%; max-width: 600px; height: 92dvh; display: none; flex-direction: column; background: var(--card); border: 1px solid var(--border); border-radius: 12px; position: relative; margin: 10px; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
         
@@ -42,7 +41,8 @@
         .other-msg .msg-actions { left: 5px; }
         .msg-actions button { padding: 2px 8px; font-size: 0.7rem; background: none; border: none; color: #8b949e; cursor: pointer; }
         
-        .input-area { padding: 16px; border-top: 1px solid var(--border); background: var(--card); flex-shrink: 0; padding-bottom: max(16px, env(safe-area-inset-bottom)); }
+        /* The Fix: Ensuring the input area stays fixed at the bottom of the visual viewport */
+        .input-area { padding: 16px; border-top: 1px solid var(--border); background: var(--card); flex-shrink: 0; padding-bottom: max(16px, env(safe-area-inset-bottom)); width: 100%; }
         textarea { width: 100%; background: var(--bg); border: 1px solid var(--border); color: var(--text); padding: 12px; border-radius: 8px; outline: none; resize: none; font-size: 16px; appearance: none; }
         
         .controls { display: flex; justify-content: space-between; align-items: center; margin-top: 10px; }
@@ -135,25 +135,19 @@ let myUsername = "";
 let myUser = null;
 let typingTimeout = null;
 
-// --- CRITICAL MOBILE KEYBOARD FIX ---
-const adjustViewport = () => {
-    if (window.visualViewport) {
-        const vv = window.visualViewport;
-        const app = document.getElementById('app');
-        if (app.style.display === 'flex') {
-            app.style.height = vv.height + "px";
-            // Scroll input into view if it's hidden
-            if (document.activeElement.tagName === 'TEXTAREA') {
-                document.activeElement.scrollIntoView({ block: "nearest" });
-            }
-        }
-        window.scrollTo(0, 0);
-    }
+// --- MOBILE KEYBOARD HEIGHT HANDLING ---
+const syncChatScroll = () => {
+    const chat = document.getElementById("chat");
+    chat.scrollTop = chat.scrollHeight;
 };
 
 if (window.visualViewport) {
-    window.visualViewport.addEventListener('resize', adjustViewport);
-    window.visualViewport.addEventListener('scroll', adjustViewport);
+    window.visualViewport.addEventListener('resize', () => {
+        // When viewport shrinks (keyboard up), scroll to bottom
+        if (window.visualViewport.height < window.innerHeight * 0.8) {
+            syncChatScroll();
+        }
+    });
 }
 
 // --- UTILITIES ---
@@ -216,7 +210,7 @@ function appendMsg(m, isBulk = false) {
     `;
     chat.appendChild(msgDiv);
     updateSeenUI(m.id, m.seen_by);
-    if (!isBulk) chat.scrollTop = chat.scrollHeight;
+    if (!isBulk) syncChatScroll();
 }
 
 function updateSeenUI(id, seenBy) {
@@ -295,8 +289,7 @@ async function markAsSeen(messageId, seenByArray) {
 async function loadMessages() {
     const { data } = await supabase.from('messages').select('*').order('time', { ascending: false }).limit(50);
     if(data) { data.reverse().forEach(m => appendMsg(m, true)); }
-    const chat = document.getElementById("chat");
-    chat.scrollTop = chat.scrollHeight;
+    syncChatScroll();
 }
 
 function setupRealtime() {
@@ -353,10 +346,7 @@ document.getElementById("msg").onkeydown = (e) => {
 };
 
 document.getElementById("msg").onfocus = () => {
-    setTimeout(() => {
-        document.getElementById("chat").scrollTop = document.getElementById("chat").scrollHeight;
-        adjustViewport();
-    }, 300);
+    setTimeout(syncChatScroll, 300);
 };
 
 document.getElementById("msg").oninput = () => {
@@ -411,7 +401,6 @@ document.getElementById("sendBtn").onclick = async () => {
     inp.value = ""; 
     setTyping(false);
     cancelReply();
-    // Keep focus after send on desktop, blur on mobile to hide keyboard if desired
     if(window.innerWidth > 600) inp.focus();
 };
 
