@@ -270,23 +270,41 @@ async function loadMessages() {
 }
 
 function setupRealtime() {
-    supabase.channel('room1')
+    console.log("Attempting to connect to Realtime...");
+
+    const channel = supabase.channel('room1')
     .on('postgres_changes', { event: '*', schema: 'public', table: 'messages' }, payload => {
-        if (payload.eventType === 'INSERT') appendMsg(payload.new);
+        console.log("Change received!", payload); // This will tell us if data is arriving
+        if (payload.eventType === 'INSERT') {
+            appendMsg(payload.new);
+            // Play sound for new messages from others
+            if (payload.new.uid !== myUser.id) {
+                document.getElementById('msg-sound').play().catch(() => {});
+            }
+        }
         else if (payload.eventType === 'UPDATE') {
             const el = document.getElementById(`msg-${payload.new.id}`);
             if(el) {
                 el.querySelector('.msg-content').innerText = payload.new.msg;
-                if(payload.new.edited && !el.querySelector('.edited-tag')) {
-                    el.querySelector('.msg-line').insertAdjacentHTML('beforeend', `<span class="edited-tag">(edited)</span>`);
+                // Update seen status visually
+                const seenEl = document.getElementById(`seen-${payload.new.id}`);
+                if(seenEl && payload.new.seen_by) {
+                    seenEl.innerText = payload.new.seen_by.length > 0 ? "👁️ " + payload.new.seen_by.join(", ") : "";
                 }
             }
         }
-        else if (payload.eventType === 'DELETE') document.getElementById(`msg-${payload.old.id}`)?.remove();
+        else if (payload.eventType === 'DELETE') {
+            document.getElementById(`msg-${payload.old.id}`)?.remove();
+        }
     })
+    .subscribe((status) => {
+        console.log("Realtime status:", status); // Should say 'SUBSCRIBED'
+    });
+
+    // Also sync the member list updates
+    supabase.channel('user_updates')
     .on('postgres_changes', { event: '*', schema: 'public', table: 'allowed_users' }, () => updateMemberList())
     .subscribe();
-    updateMemberList();
 }
 
 async function init() {
