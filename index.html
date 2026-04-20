@@ -270,38 +270,41 @@ async function loadMessages() {
 }
 
 function setupRealtime() {
-    console.log("Connecting to Realtime...");
+    console.log("Setting up Unified Realtime...");
 
-    supabase
-    .channel('public:messages') // Use a simple, direct channel name
-    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, payload => {
-        console.log("New message arrived!", payload.new);
-        // Only append if it's not already there (prevents doubles)
-        if (!document.getElementById(`msg-${payload.new.id}`)) {
-            appendMsg(payload.new);
-            // Play sound if it's not from us
-            if (payload.new.uid !== myUser.id) {
-                document.getElementById('msg-sound').play().catch(() => {});
+    const channel = supabase.channel('main_room')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'messages' }, payload => {
+            console.log("Message Change:", payload.eventType, payload.new);
+            
+            if (payload.eventType === 'INSERT') {
+                // Only add if it doesn't exist already
+                if (!document.getElementById(`msg-${payload.new.id}`)) {
+                    appendMsg(payload.new);
+                }
+            } else if (payload.eventType === 'UPDATE') {
+                const el = document.getElementById(`msg-${payload.new.id}`);
+                if (el) {
+                    el.querySelector('.msg-content').innerText = payload.new.msg;
+                    const seenEl = document.getElementById(`seen-${payload.new.id}`);
+                    if (seenEl && payload.new.seen_by) {
+                        seenEl.innerText = payload.new.seen_by.length > 0 ? "👁️ " + payload.new.seen_by.join(", ") : "";
+                    }
+                }
+            } else if (payload.eventType === 'DELETE') {
+                document.getElementById(`msg-${payload.old.id}`)?.remove();
             }
-        }
-    })
-    .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'messages' }, payload => {
-        const el = document.getElementById(`msg-${payload.new.id}`);
-        if (el) {
-            el.querySelector('.msg-content').innerText = payload.new.msg;
-        }
-    })
-    .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'messages' }, payload => {
-        document.getElementById(`msg-${payload.old.id}`)?.remove();
-    })
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'allowed_users' }, () => {
-        updateMemberList();
-    })
-    .subscribe((status) => {
-        console.log("Realtime status:", status);
-    });
-}
+        })
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'allowed_users' }, () => {
+            console.log("User table changed! Updating list...");
+            updateMemberList();
+        })
+        .subscribe((status) => {
+            console.log("CONNECTION STATUS:", status);
+        });
 
+    // Initial load for members
+    updateMemberList();
+}
 async function init() {
     let { data: { session } } = await supabase.auth.getSession();
     if (!session) { const { data } = await supabase.auth.signInAnonymously(); session = data.session; }
@@ -348,6 +351,7 @@ window.deleteMsg = async (id) => { if(confirm("Delete?")) await supabase.from('m
 document.getElementById("sendBtn").onclick = async () => {
     const inp = document.getElementById("msg");
     const val = inp.value.trim();
+    
     if(!val || isCooldown || checkSpam()) return;
 
     if(editingId) {
@@ -355,14 +359,16 @@ document.getElementById("sendBtn").onclick = async () => {
         editingId = null; 
         document.getElementById("sendBtn").innerText = "Send Message";
     } else {
-        // Just insert. The setupRealtime() function above will handle showing it.
-        await supabase.from('messages').insert([{ 
+        const { error } = await supabase.from('messages').insert([{ 
             uid: myUser.id, 
             name: myUsername, 
             msg: val, 
             reply_to: currentReply 
         }]);
+        
+        if (error) console.error("Send error:", error.message);
     }
+    
     inp.value = ""; 
     cancelReply();
 };
