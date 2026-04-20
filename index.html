@@ -350,32 +350,22 @@ document.getElementById("sendBtn").onclick = async () => {
     const val = inp.value.trim();
     if(!val || isCooldown || checkSpam()) return;
 
-    // Use .select() to get the actual row back from the DB
-    const { data, error } = await supabase
-        .from('messages')
-        .insert([{ 
+    if(editingId) {
+        await supabase.from('messages').update({ msg: val, edited: true }).eq('id', editingId);
+        editingId = null; 
+        document.getElementById("sendBtn").innerText = "Send Message";
+    } else {
+        // Just insert. The setupRealtime() function above will handle showing it.
+        await supabase.from('messages').insert([{ 
             uid: myUser.id, 
             name: myUsername, 
             msg: val, 
             reply_to: currentReply 
-            // Don't send 'id' - let the DB handle it
-        }])
-        .select(); 
-
-    if (error) {
-        console.error("Insert Error:", error);
-    } else if (data && data[0]) {
-        // If Realtime is working, it will append the message.
-        // If not, this line ensures YOU at least see it.
-        if (!document.getElementById(`msg-${data[0].id}`)) {
-            appendMsg(data[0]);
-        }
+        }]);
     }
-
     inp.value = ""; 
     cancelReply();
 };
-
 init();
 </script>
 </body>
