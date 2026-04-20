@@ -272,24 +272,27 @@ async function loadMessages() {
 function setupRealtime() {
     console.log("Syncing Realtime...");
 
-    // 1. Listen for MESSAGES
-    supabase.channel('msg_channel')
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'messages' }, payload => {
+    // 1. Listen for MESSAGES with Error Logging
+    const msgChannel = supabase.channel('msg_channel')
+    .on('postgres_changes', { 
+        event: '*', 
+        schema: 'public', 
+        table: 'messages' 
+    }, payload => {
+        console.log("REALTIME PAYLOAD RECEIVED:", payload);
         if (payload.eventType === 'INSERT') appendMsg(payload.new);
         if (payload.eventType === 'UPDATE') {
             const el = document.getElementById(`msg-${payload.new.id}`);
             if(el) {
                 el.querySelector('.msg-content').innerText = payload.new.msg;
-                const seenEl = document.getElementById(`seen-${payload.new.id}`);
-                if(seenEl && payload.new.seen_by) {
-                    seenEl.innerText = payload.new.seen_by.length > 0 ? "👁️ " + payload.new.seen_by.join(", ") : "";
-                }
             }
         }
         if (payload.eventType === 'DELETE') document.getElementById(`msg-${payload.old.id}`)?.remove();
     })
-    .subscribe();
-
+    .subscribe((status, err) => {
+        if (err) console.error("SUBSCRIPTION ERROR:", err);
+        console.log("SUBSCRIPTION STATUS:", status);
+    });
     // 2. Listen for USER CHANGES (Member list + Typing)
     supabase.channel('user_channel')
     .on('postgres_changes', { event: '*', schema: 'public', table: 'allowed_users' }, (payload) => {
