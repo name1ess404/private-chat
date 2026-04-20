@@ -41,15 +41,22 @@
         .footer-credits { font-size: 0.65rem; opacity: 0.4; letter-spacing: 3px; margin-top: 10px; text-transform: uppercase; font-weight: 700; text-align: center; width: 100%; }
         #maint-overlay { display: none; text-align: center; padding: 15px; color: var(--warning); font-weight: 600; background: rgba(210, 153, 34, 0.1); border-radius: 8px; border: 1px dashed var(--warning); }
         
-        /* Seen UI Features */
-        .seen-wrapper { position: relative; display: inline-block; cursor: pointer; user-select: none; margin-top: 2px; }
+        /* THE SEEN FEATURE UI */
+        .seen-wrapper { position: relative; display: inline-block; cursor: pointer; margin-top: 2px; }
         .seen-tooltip { 
-            display: none; position: absolute; bottom: 20px; right: 0; 
-            background: #161b22; border: 1px solid var(--border); padding: 5px 10px; 
-            border-radius: 4px; font-size: 0.75rem; white-space: nowrap; z-index: 100; box-shadow: 0 4px 12px rgba(0,0,0,0.5); 
+            display: none; position: absolute; bottom: 18px; 
+            background: #0d1117; border: 1px solid var(--border); padding: 4px 8px; 
+            border-radius: 4px; font-size: 0.65rem; white-space: nowrap; z-index: 100; 
+            box-shadow: 0 2px 8px rgba(0,0,0,0.8); color: var(--text);
         }
+        /* Positions tooltip based on message side */
+        .my-msg .seen-tooltip { right: 0; }
+        .other-msg .seen-tooltip { left: 0; }
+
         .seen-wrapper:hover .seen-tooltip { display: block; }
         .seen-tooltip.active { display: block; }
+        .seen-eye { font-size: 0.7rem; opacity: 0.5; transition: opacity 0.2s; }
+        .seen-eye:hover { opacity: 1; }
     </style>
 </head>
 <body>
@@ -172,10 +179,10 @@ function appendMsg(m, isBulk = false) {
         <p class="msg-line">
             <span class="name">${m.name}<span class="timestamp">${timeStr}</span>:</span>
             <span class="msg-content">${m.msg}</span>
-            <span class="edit-status">${m.edited ? '<span class="edited-tag" style="font-size: 0.7rem; opacity: 0.5; font-style: italic; margin-left: 5px;">(edited)</span>' : ''}</span>
+            <span class="edit-status">${m.edited ? '<span style="font-size: 0.7rem; opacity: 0.5; font-style: italic; margin-left: 5px;">(edited)</span>' : ''}</span>
         </p>
         <div class="seen-wrapper" onclick="toggleSeen(event, '${m.id}')">
-            <span id="seen-count-${m.id}" style="font-size: 0.65rem; opacity: 0.6;"></span>
+            <span class="seen-eye" id="eye-${m.id}"></span>
             <div id="seen-list-${m.id}" class="seen-tooltip"></div>
         </div>
     `;
@@ -185,14 +192,15 @@ function appendMsg(m, isBulk = false) {
 }
 
 function updateSeenUI(id, seenBy) {
-    const countEl = document.getElementById(`seen-count-${id}`);
+    const eyeEl = document.getElementById(`eye-${id}`);
     const listEl = document.getElementById(`seen-list-${id}`);
-    if (!countEl || !listEl) return;
+    if (!eyeEl || !listEl) return;
+
     if (seenBy && seenBy.length > 0) {
-        countEl.innerText = `👁️ ${seenBy.length}`;
+        eyeEl.innerText = `👁️ ${seenBy.length}`;
         listEl.innerText = seenBy.join(", ");
     } else {
-        countEl.innerText = "";
+        eyeEl.innerText = "";
         listEl.innerText = "";
     }
 }
@@ -267,9 +275,7 @@ async function loadMessages() {
 }
 
 function setupRealtime() {
-    console.log("Setting up Unified Realtime...");
     const channelId = 'room_' + Math.random().toString(36).substr(2, 9);
-    
     supabase.channel(channelId)
         .on('postgres_changes', { event: '*', schema: 'public', table: 'messages' }, payload => {
             if (payload.eventType === 'INSERT') {
@@ -279,9 +285,7 @@ function setupRealtime() {
                 if (el) {
                     el.querySelector('.msg-content').innerText = payload.new.msg;
                     const editArea = el.querySelector('.edit-status');
-                    if (payload.new.edited) {
-                        editArea.innerHTML = '<span class="edited-tag" style="font-size: 0.7rem; opacity: 0.5; font-style: italic; margin-left: 5px;">(edited)</span>';
-                    }
+                    editArea.innerHTML = payload.new.edited ? '<span style="font-size: 0.7rem; opacity: 0.5; font-style: italic; margin-left: 5px;">(edited)</span>' : '';
                     updateSeenUI(payload.new.id, payload.new.seen_by);
                     document.querySelectorAll(`[data-replying-to="${payload.new.id}"] .reply-text`).forEach(prev => {
                         prev.innerText = payload.new.msg.substring(0, 50);
@@ -321,6 +325,13 @@ async function init() {
 }
 
 // --- EVENTS ---
+
+document.getElementById("msg").onkeydown = (e) => {
+    if (e.key === "Enter" && !e.shiftKey && window.innerWidth > 600) {
+        e.preventDefault();
+        document.getElementById("sendBtn").click();
+    }
+};
 
 document.getElementById("msg").oninput = () => {
     if (!typingTimeout) setTyping(true);
@@ -366,7 +377,7 @@ document.getElementById("sendBtn").onclick = async () => {
         editingId = null; 
         document.getElementById("sendBtn").innerText = "Send Message";
     } else {
-        await supabase.from('messages').insert([{ uid: myUser.id, name: myUsername, msg: val, reply_to: currentReply }]);
+        await supabase.from('messages').insert([{ uid: myUser.id, name: myUsername, msg: val, reply_to: currentReply, seen_by: [myUsername] }]);
     }
     inp.value = ""; 
     setTyping(false);
