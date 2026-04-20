@@ -229,36 +229,35 @@ async function loadMessages() {
 }
 
 function setupRealtime() {
-    const channel = supabase.channel('main_room')
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'messages' }, payload => {
-            if (payload.eventType === 'INSERT') {
-                if (!document.getElementById(`msg-${payload.new.id}`)) appendMsg(payload.new);
-            } else if (payload.eventType === 'UPDATE') {
-                const el = document.getElementById(`msg-${payload.new.id}`);
-                if (el) {
-                    el.querySelector('.msg-content').innerText = payload.new.msg;
-                    if (!el.querySelector('.edited-tag')) {
-                        const p = el.querySelector('.msg-line');
-                        const span = document.createElement('span');
-                        span.className = 'edited-tag';
-                        span.innerText = '(edited)';
-                        p.appendChild(span);
-                    }
-                    const seenEl = document.getElementById(`seen-${payload.new.id}`);
-                    if (seenEl && payload.new.seen_by) seenEl.innerText = payload.new.seen_by.length > 0 ? "👁️ " + payload.new.seen_by.join(", ") : "";
-                }
-                // FIX FOR REPLY BUG: Update any previews pointing to this edited message
-                document.querySelectorAll(`[data-replying-to="${payload.new.id}"] .reply-text`).forEach(preview => {
-                    preview.innerText = payload.new.msg.substring(0, 50);
-                });
-            } else if (payload.eventType === 'DELETE') {
-                document.getElementById(`msg-${payload.old.id}`)?.remove();
+    console.log("Setting up Unified Realtime...");
+
+    const channel = supabase.channel('main_room', {
+        config: {
+            ack: true // Force acknowledgement of the connection
+        }
+    })
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'messages' }, payload => {
+        if (payload.eventType === 'INSERT') {
+            if (!document.getElementById(`msg-${payload.new.id}`)) {
+                appendMsg(payload.new);
             }
-        })
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'allowed_users' }, () => {
+        }
+        // ... (Keep your UPDATE and DELETE logic here)
+    })
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'allowed_users' }, () => {
+        updateMemberList();
+    })
+    .subscribe(async (status) => {
+        console.log("CONNECTION STATUS:", status);
+        if (status === 'CHANNEL_ERROR') {
+            console.log("Realtime failed. Retrying in 3s...");
+            setTimeout(setupRealtime, 3000);
+        }
+        if (status === 'SUBSCRIBED') {
+            // Force a refresh of the UI once we are back online
             updateMemberList();
-        })
-        .subscribe();
+        }
+    });
 }
 
 async function init() {
