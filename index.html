@@ -139,7 +139,6 @@ const checkSpam = () => {
 
 function appendMsg(m, isBulk = false) {
     if (document.getElementById(`msg-${m.id}`)) {
-        // Update seen list if message already exists but payload changed
         const seenEl = document.getElementById(`seen-${m.id}`);
         if(seenEl && m.seen_by) seenEl.innerText = m.seen_by.length > 0 ? "👁️ " + m.seen_by.join(", ") : "";
         return;
@@ -150,7 +149,6 @@ function appendMsg(m, isBulk = false) {
     const align = isMe ? 'my-msg' : 'other-msg';
     const timeStr = new Date(m.time).toLocaleTimeString('en-US', { timeZone: 'Asia/Dhaka', hour: '2-digit', minute: '2-digit', hour12: true });
 
-    // Mark as seen if it's not my own message
     if (!isMe) markAsSeen(m.id, m.seen_by);
 
     const msgDiv = document.createElement('div');
@@ -162,7 +160,7 @@ function appendMsg(m, isBulk = false) {
             ${isMe ? `<button onclick="startEdit('${m.id}')">Edit</button>` : ''}
             ${isMe ? `<button onclick="deleteMsg('${m.id}')" style="color:var(--danger)">Delete</button>` : ''}
         </div>
-        ${m.reply_to ? `<div class="reply-preview" onclick="scrollToMessage('${m.reply_to.id}')"><b>${m.reply_to.name}:</b> ${m.reply_to.msg}</div>` : ''}
+        ${m.reply_to ? `<div class="reply-preview" data-replying-to="${m.reply_to.id}" onclick="scrollToMessage('${m.reply_to.id}')"><b>${m.reply_to.name}:</b> <span class="reply-text">${m.reply_to.msg}</span></div>` : ''}
         <p class="msg-line">
             <span class="name">${m.name}<span class="timestamp">${timeStr}</span>:</span>
             <span class="msg-content">${m.msg}</span>
@@ -177,7 +175,6 @@ function appendMsg(m, isBulk = false) {
 }
 
 const heartbeat = () => {
-    // Silent update - no console printing
     supabase.from('allowed_users').update({ last_seen: Date.now() }).eq('id', myUser.id).then(() => {});
 };
 
@@ -192,37 +189,14 @@ async function updateMemberList() {
     data?.forEach(u => {
         const lastActive = Number(u.last_seen);
         if (!lastActive) return;
-
         const diffMs = now - lastActive;
         const diffMins = Math.floor(diffMs / 60000);
         
-        // Logic: 
-        // 1. If seen < 60s ago: Status "Active" (Green)
-        // 2. If 1m - 5m ago: Status "X min ago" (Gray)
-        // 3. If > 5m ago: Don't show at all
-        
         if (diffMs < 60000 || u.id === myUser.id) {
-            // CURRENTLY ACTIVE
-            list.innerHTML += `
-                <div class="member-item">
-                    <div class="status-dot" style="background: var(--accent)"></div>
-                    <div style="display:flex; flex-direction:column;">
-                        <span>${u.username} ${u.id === myUser.id ? '(You)' : ''}</span>
-                        <small style="font-size:0.7rem; opacity:0.6;">Active</small>
-                    </div>
-                </div>`;
+            list.innerHTML += `<div class="member-item"><div class="status-dot" style="background: var(--accent)"></div><div style="display:flex; flex-direction:column;"><span>${u.username} ${u.id === myUser.id ? '(You)' : ''}</span><small style="font-size:0.7rem; opacity:0.6;">Active</small></div></div>`;
         } else if (diffMins < 5) {
-            // AWAY (BUT WITHIN 5 MINUTES)
-            list.innerHTML += `
-                <div class="member-item">
-                    <div class="status-dot" style="background: #555"></div>
-                    <div style="display:flex; flex-direction:column;">
-                        <span>${u.username}</span>
-                        <small style="font-size:0.7rem; opacity:0.6;">${diffMins}m ago</small>
-                    </div>
-                </div>`;
+            list.innerHTML += `<div class="member-item"><div class="status-dot" style="background: #555"></div><div style="display:flex; flex-direction:column;"><span>${u.username}</span><small style="font-size:0.7rem; opacity:0.6;">${diffMins}m ago</small></div></div>`;
         }
-
         if (u.id !== myUser.id && u.is_typing) typers.push(u.username);
     });
     typingEl.innerText = typers.length > 0 ? typers.join(", ") + " is typing..." : "";
@@ -231,22 +205,10 @@ async function updateMemberList() {
 document.getElementById("reqBtn").onclick = async () => {
     const name = document.getElementById("req-name").value.trim();
     if (!name) return alert("Enter a nickname");
-    
-    const { error } = await supabase.from('allowed_users').insert([{
-        id: myUser.id,
-        username: name,
-        role: 'pending',
-        last_seen: Date.now()
-    }]);
-
-    if (error) {
-        document.getElementById("req-status").innerText = "Error: " + error.message;
-    } else {
-        document.getElementById("req-status").innerText = "Request sent! Wait for admin approval.";
-        document.getElementById("reqBtn").disabled = true;
-    }
+    const { error } = await supabase.from('allowed_users').insert([{ id: myUser.id, username: name, role: 'pending', last_seen: Date.now() }]);
+    if (error) { document.getElementById("req-status").innerText = "Error: " + error.message; } 
+    else { document.getElementById("req-status").innerText = "Request sent! Wait for admin approval."; document.getElementById("reqBtn").disabled = true; }
 };
-
 
 async function markAsSeen(messageId, seenByArray) {
     if (!myUsername) return;
@@ -257,54 +219,48 @@ async function markAsSeen(messageId, seenByArray) {
     }
 }
 
-
-
-// Update the list visually every 30 seconds even if no database change happens
 setInterval(updateMemberList, 30000);
-
-// --- SYSTEM ---
 
 async function loadMessages() {
     const { data } = await supabase.from('messages').select('*').order('time', { ascending: true }).limit(50);
     if(data) data.forEach(m => appendMsg(m, true));
+    const chat = document.getElementById("chat");
+    chat.scrollTop = chat.scrollHeight;
 }
 
 function setupRealtime() {
-    console.log("Setting up Unified Realtime...");
-
     const channel = supabase.channel('main_room')
         .on('postgres_changes', { event: '*', schema: 'public', table: 'messages' }, payload => {
-            console.log("Message Change:", payload.eventType, payload.new);
-            
             if (payload.eventType === 'INSERT') {
-                // Only add if it doesn't exist already
-                if (!document.getElementById(`msg-${payload.new.id}`)) {
-                    appendMsg(payload.new);
-                }
+                if (!document.getElementById(`msg-${payload.new.id}`)) appendMsg(payload.new);
             } else if (payload.eventType === 'UPDATE') {
                 const el = document.getElementById(`msg-${payload.new.id}`);
                 if (el) {
                     el.querySelector('.msg-content').innerText = payload.new.msg;
-                    const seenEl = document.getElementById(`seen-${payload.new.id}`);
-                    if (seenEl && payload.new.seen_by) {
-                        seenEl.innerText = payload.new.seen_by.length > 0 ? "👁️ " + payload.new.seen_by.join(", ") : "";
+                    if (!el.querySelector('.edited-tag')) {
+                        const p = el.querySelector('.msg-line');
+                        const span = document.createElement('span');
+                        span.className = 'edited-tag';
+                        span.innerText = '(edited)';
+                        p.appendChild(span);
                     }
+                    const seenEl = document.getElementById(`seen-${payload.new.id}`);
+                    if (seenEl && payload.new.seen_by) seenEl.innerText = payload.new.seen_by.length > 0 ? "👁️ " + payload.new.seen_by.join(", ") : "";
                 }
+                // FIX FOR REPLY BUG: Update any previews pointing to this edited message
+                document.querySelectorAll(`[data-replying-to="${payload.new.id}"] .reply-text`).forEach(preview => {
+                    preview.innerText = payload.new.msg.substring(0, 50);
+                });
             } else if (payload.eventType === 'DELETE') {
                 document.getElementById(`msg-${payload.old.id}`)?.remove();
             }
         })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'allowed_users' }, () => {
-            console.log("User table changed! Updating list...");
             updateMemberList();
         })
-        .subscribe((status) => {
-            console.log("CONNECTION STATUS:", status);
-        });
-
-    // Initial load for members
-    updateMemberList();
+        .subscribe();
 }
+
 async function init() {
     let { data: { session } } = await supabase.auth.getSession();
     if (!session) { const { data } = await supabase.auth.signInAnonymously(); session = data.session; }
@@ -348,10 +304,23 @@ window.startEdit = (id) => {
 };
 window.deleteMsg = async (id) => { if(confirm("Delete?")) await supabase.from('messages').delete().eq('id', id); };
 
+// FIX FOR NICKNAME BUTTON
+document.getElementById("nameBtn").onclick = async () => {
+    const newName = prompt("Enter your new nickname:", myUsername);
+    if (newName && newName.trim() !== "" && newName !== myUsername) {
+        const { error } = await supabase.from('allowed_users').update({ username: newName.trim() }).eq('id', myUser.id);
+        if (error) alert("Error updating name: " + error.message);
+        else {
+            myUsername = newName.trim();
+            document.getElementById("display-name").innerText = myUsername;
+            updateMemberList();
+        }
+    }
+};
+
 document.getElementById("sendBtn").onclick = async () => {
     const inp = document.getElementById("msg");
     const val = inp.value.trim();
-    
     if(!val || isCooldown || checkSpam()) return;
 
     if(editingId) {
@@ -359,16 +328,8 @@ document.getElementById("sendBtn").onclick = async () => {
         editingId = null; 
         document.getElementById("sendBtn").innerText = "Send Message";
     } else {
-        const { error } = await supabase.from('messages').insert([{ 
-            uid: myUser.id, 
-            name: myUsername, 
-            msg: val, 
-            reply_to: currentReply 
-        }]);
-        
-        if (error) console.error("Send error:", error.message);
+        await supabase.from('messages').insert([{ uid: myUser.id, name: myUsername, msg: val, reply_to: currentReply }]);
     }
-    
     inp.value = ""; 
     cancelReply();
 };
