@@ -349,13 +349,30 @@ document.getElementById("sendBtn").onclick = async () => {
     const inp = document.getElementById("msg");
     const val = inp.value.trim();
     if(!val || isCooldown || checkSpam()) return;
+
+    // Disable button briefly to prevent double-sends
+    const btn = document.getElementById("sendBtn");
+    btn.disabled = true;
+
     if(editingId) {
-        await supabase.from('messages').update({ msg: val, edited: true }).eq('id', editingId);
-        editingId = null; document.getElementById("sendBtn").innerText = "Send Message";
+        const { error } = await supabase.from('messages').update({ msg: val, edited: true }).eq('id', editingId);
+        if(error) console.error("Edit Error:", error);
+        editingId = null; 
+        btn.innerText = "Send Message";
     } else {
-        await supabase.from('messages').insert([{ uid: myUser.id, name: myUsername, msg: val, reply_to: currentReply }]);
+        const { error } = await supabase.from('messages').insert([{ 
+            uid: myUser.id, 
+            name: myUsername, 
+            msg: val, 
+            reply_to: currentReply,
+            time: new Date().toISOString()
+        }]);
+        if(error) console.error("Insert Error:", error);
     }
-    inp.value = ""; cancelReply();
+
+    btn.disabled = false;
+    inp.value = ""; 
+    cancelReply();
 };
 
 init();
