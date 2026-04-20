@@ -270,39 +270,36 @@ async function loadMessages() {
 }
 
 function setupRealtime() {
-    console.log("Syncing Realtime...");
+    console.log("Connecting to Realtime...");
 
-    // 1. Listen for MESSAGES with Error Logging
-    const msgChannel = supabase.channel('msg_channel')
-    .on('postgres_changes', { 
-        event: '*', 
-        schema: 'public', 
-        table: 'messages' 
-    }, payload => {
-        console.log("REALTIME PAYLOAD RECEIVED:", payload);
-        if (payload.eventType === 'INSERT') appendMsg(payload.new);
-        if (payload.eventType === 'UPDATE') {
-            const el = document.getElementById(`msg-${payload.new.id}`);
-            if(el) {
-                el.querySelector('.msg-content').innerText = payload.new.msg;
+    supabase
+    .channel('public:messages') // Use a simple, direct channel name
+    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, payload => {
+        console.log("New message arrived!", payload.new);
+        // Only append if it's not already there (prevents doubles)
+        if (!document.getElementById(`msg-${payload.new.id}`)) {
+            appendMsg(payload.new);
+            // Play sound if it's not from us
+            if (payload.new.uid !== myUser.id) {
+                document.getElementById('msg-sound').play().catch(() => {});
             }
         }
-        if (payload.eventType === 'DELETE') document.getElementById(`msg-${payload.old.id}`)?.remove();
     })
-    .subscribe((status, err) => {
-        if (err) console.error("SUBSCRIPTION ERROR:", err);
-        console.log("SUBSCRIPTION STATUS:", status);
+    .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'messages' }, payload => {
+        const el = document.getElementById(`msg-${payload.new.id}`);
+        if (el) {
+            el.querySelector('.msg-content').innerText = payload.new.msg;
+        }
+    })
+    .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'messages' }, payload => {
+        document.getElementById(`msg-${payload.old.id}`)?.remove();
+    })
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'allowed_users' }, () => {
+        updateMemberList();
+    })
+    .subscribe((status) => {
+        console.log("Realtime status:", status);
     });
-    // 2. Listen for USER CHANGES (Member list + Typing)
-    supabase.channel('user_channel')
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'allowed_users' }, (payload) => {
-        console.log("User table changed, updating list...");
-        updateMemberList(); 
-    })
-    .subscribe();
-
-    // Initial pull to fill the list
-    updateMemberList();
 }
 
 async function init() {
