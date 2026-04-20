@@ -41,7 +41,6 @@
         .footer-credits { font-size: 0.65rem; opacity: 0.4; letter-spacing: 3px; margin-top: 10px; text-transform: uppercase; font-weight: 700; text-align: center; width: 100%; }
         #maint-overlay { display: none; text-align: center; padding: 15px; color: var(--warning); font-weight: 600; background: rgba(210, 153, 34, 0.1); border-radius: 8px; border: 1px dashed var(--warning); }
         
-        /* THE SEEN FEATURE UI */
         .seen-wrapper { position: relative; display: inline-block; cursor: pointer; margin-top: 2px; }
         .seen-tooltip { 
             display: none; position: absolute; bottom: 18px; 
@@ -49,10 +48,8 @@
             border-radius: 4px; font-size: 0.65rem; white-space: nowrap; z-index: 100; 
             box-shadow: 0 2px 8px rgba(0,0,0,0.8); color: var(--text);
         }
-        /* Positions tooltip based on message side */
         .my-msg .seen-tooltip { right: 0; }
         .other-msg .seen-tooltip { left: 0; }
-
         .seen-wrapper:hover .seen-tooltip { display: block; }
         .seen-tooltip.active { display: block; }
         .seen-eye { font-size: 0.7rem; opacity: 0.5; transition: opacity 0.2s; }
@@ -268,8 +265,11 @@ async function markAsSeen(messageId, seenByArray) {
 }
 
 async function loadMessages() {
-    const { data } = await supabase.from('messages').select('*').order('time', { ascending: true }).limit(50);
-    if(data) data.forEach(m => appendMsg(m, true));
+    // FIX: Order by 'time' DESC to get newest 50, then reverse them for chronological display
+    const { data } = await supabase.from('messages').select('*').order('time', { ascending: false }).limit(50);
+    if(data) {
+        data.reverse().forEach(m => appendMsg(m, true));
+    }
     const chat = document.getElementById("chat");
     chat.scrollTop = chat.scrollHeight;
 }
