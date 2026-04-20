@@ -353,27 +353,33 @@ document.getElementById("sendBtn").onclick = async () => {
     const val = inp.value.trim();
     if(!val || isCooldown || checkSpam()) return;
 
-    // Disable button briefly to prevent double-sends
-    const btn = document.getElementById("sendBtn");
-    btn.disabled = true;
+    const newMsg = {
+        id: crypto.randomUUID(), // Temporary ID for UI
+        uid: myUser.id,
+        name: myUsername,
+        msg: val,
+        time: new Date().toISOString(),
+        reply_to: currentReply,
+        seen_by: []
+    };
 
-    if(editingId) {
-        const { error } = await supabase.from('messages').update({ msg: val, edited: true }).eq('id', editingId);
-        if(error) console.error("Edit Error:", error);
-        editingId = null; 
-        btn.innerText = "Send Message";
-    } else {
-        const { error } = await supabase.from('messages').insert([{ 
-            uid: myUser.id, 
-            name: myUsername, 
-            msg: val, 
-            reply_to: currentReply,
-            time: new Date().toISOString()
-        }]);
-        if(error) console.error("Insert Error:", error);
+    // 1. LOCAL UPDATE: Show it immediately so you don't have to wait
+    appendMsg(newMsg); 
+
+    // 2. DATABASE UPDATE
+    const { error } = await supabase.from('messages').insert([{ 
+        uid: myUser.id, 
+        name: myUsername, 
+        msg: val, 
+        reply_to: currentReply 
+    }]);
+
+    if(error) {
+        console.error("Upload failed:", error);
+        document.getElementById(`msg-${newMsg.id}`)?.remove(); // Remove if failed
+        alert("Message failed to send.");
     }
 
-    btn.disabled = false;
     inp.value = ""; 
     cancelReply();
 };
