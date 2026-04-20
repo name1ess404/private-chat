@@ -70,7 +70,7 @@ const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZ
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
 let myUser = null;
-let messageData = []; // Store messages locally for pinning logic
+let messageData = [];
 
 async function checkAuth() {
     let { data: { session } } = await supabase.auth.getSession();
@@ -96,15 +96,9 @@ function initDashboard() {
 }
 
 async function setupRealtime() {
-    supabase.channel('system_updates')
+    supabase.channel('db_changes')
         .on('postgres_changes', { event: '*', schema: 'public', table: 'system_settings' }, () => syncSystemUI())
-        .subscribe();
-
-    supabase.channel('user_updates')
         .on('postgres_changes', { event: '*', schema: 'public', table: 'allowed_users' }, () => loadMembers())
-        .subscribe();
-
-    supabase.channel('msg_updates')
         .on('postgres_changes', { event: '*', schema: 'public', table: 'messages' }, () => loadMessages())
         .subscribe();
 
@@ -167,85 +161,61 @@ async function loadMessages() {
     });
 }
 
-// --- GLOBAL ACTIONS ---
+// --- FIXED ACTIONS ---
 
 window.toggleMaint = async () => {
     const { data } = await supabase.from('system_settings').select('value').eq('key', 'maintenance').single();
-    const currentStatus = data.value.enabled;
-    await supabase.from('system_settings').update({ value: { enabled: !currentStatus } }).eq('key', 'maintenance');
+    const newStatus = !data.value.enabled;
+    // Explicitly update and then sync locally
+    await supabase.from('system_settings').update({ value: { enabled: newStatus } }).eq('key', 'maintenance');
+    syncSystemUI(); 
 };
 
-window.approve = async (id) => {
-    await supabase.from('allowed_users').update({ role: 'user' }).eq('id', id);
-};
-
-window.decline = async (id) => {
-    await supabase.from('allowed_users').delete().eq('id', id);
+window.unpinMessage = async () => {
+    // Ensuring exact JSON structure to override previous data
+    await supabase.from('system_settings').update({ value: { id: "", msg: "" } }).eq('key', 'pin');
+    syncSystemUI();
 };
 
 window.pinMsg = async (id) => {
     const msgObj = messageData.find(m => m.id == id);
     if(msgObj) {
         await supabase.from('system_settings').update({ value: { id: id, msg: msgObj.msg } }).eq('key', 'pin');
+        syncSystemUI();
     }
 };
 
-window.unpinMessage = async () => {
-    await supabase.from('system_settings').update({ value: { id: "", msg: "" } }).eq('key', 'pin');
-};
+// --- REST OF ACTIONS ---
 
-window.deleteMsg = async (id) => {
-    if(confirm("Delete this message?")) await supabase.from('messages').delete().eq('id', id);
-};
-
-window.makeAdmin = async (id) => {
-    if(confirm("Promote to Admin?")) await supabase.from('allowed_users').update({ role: "admin" }).eq('id', id);
-};
-
-window.demoteAdmin = async (id) => {
-    if(confirm("Demote this Admin to User?")) await supabase.from('allowed_users').update({ role: "user" }).eq('id', id);
-};
-
+window.approve = async (id) => { await supabase.from('allowed_users').update({ role: 'user' }).eq('id', id); };
+window.decline = async (id) => { await supabase.from('allowed_users').delete().eq('id', id); };
+window.deleteMsg = async (id) => { if(confirm("Delete this message?")) await supabase.from('messages').delete().eq('id', id); };
+window.makeAdmin = async (id) => { if(confirm("Promote to Admin?")) await supabase.from('allowed_users').update({ role: "admin" }).eq('id', id); };
+window.demoteAdmin = async (id) => { if(confirm("Demote this Admin to User?")) await supabase.from('allowed_users').update({ role: "user" }).eq('id', id); };
 window.renameMember = async (id, old) => { 
     const n = prompt("New name for " + old + ":");
     if(n) await supabase.from('allowed_users').update({ username: n }).eq('id', id);
 };
-
 window.kickUser = async (id, name) => {
-    if(confirm("Kick " + name + "? User will have to request access again.")) {
-        await supabase.from('allowed_users').delete().eq('id', id);
-    }
+    if(confirm("Kick " + name + "?")) await supabase.from('allowed_users').delete().eq('id', id);
 };
-
 window.banUser = async (id, name) => {
-    if(confirm("Ban " + name + " permanently? This cannot be undone.")) {
-        await supabase.from('allowed_users').update({ role: 'banned' }).eq('id', id);
-    }
+    if(confirm("Ban " + name + " permanently?")) await supabase.from('allowed_users').update({ role: 'banned' }).eq('id', id);
 };
 
 window.sendAnn = async () => {
     const m = document.getElementById("ann-msg");
     const val = m.value.trim();
     if(!val) return;
-    await supabase.from('messages').insert([{ 
-        msg: val, 
-        name: "SYSTEM", 
-        type: "announcement", 
-        time: new Date().toISOString() 
-    }]);
+    await supabase.from('messages').insert([{ msg: val, name: "SYSTEM", type: "announcement", time: new Date().toISOString() }]);
     m.value = "";
     alert("Announcement Broadcasted!");
 };
 
 window.wipeChat = async () => {
-    if(confirm("Permanently wipe ALL messages from EVERYONE? This cannot be undone.")) {
-        // Standard bulk delete filter: delete all where id is not null
-        const { error } = await supabase.from('messages').delete().not('id', 'is', null);
-        if(!error) alert("Chat wiped successfully.");
-        else {
-            console.error(error);
-            alert("Error wiping chat. Check Console.");
-        }
+    if(confirm("Permanently wipe ALL messages?")) {
+        const { error } = await supabase.from('messages').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+        if(!error) alert("Chat wiped.");
     }
 };
 
