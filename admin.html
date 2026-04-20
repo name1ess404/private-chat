@@ -70,6 +70,7 @@ const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZ
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
 let myUser = null;
+let messageData = []; // Store messages locally for pinning logic
 
 async function checkAuth() {
     let { data: { session } } = await supabase.auth.getSession();
@@ -154,12 +155,13 @@ async function loadMembers() {
 
 async function loadMessages() {
     const { data } = await supabase.from('messages').select('*').order('time', { ascending: false }).limit(20);
+    messageData = data || [];
     const list = document.getElementById("messageList");
     list.innerHTML = "";
-    data?.forEach(m => {
+    messageData.forEach(m => {
         list.innerHTML += `<div class="msg-preview-item">
             <b>${m.name}:</b> ${m.msg} <br>
-            <button class="btn-success" onclick="pinMsg('${m.id}', '${m.msg.replace(/'/g, "\\'")}')">Pin</button>
+            <button class="btn-success" onclick="pinMsg('${m.id}')">Pin</button>
             <button class="btn-danger" onclick="deleteMsg('${m.id}')">Delete</button>
         </div>`;
     });
@@ -181,8 +183,11 @@ window.decline = async (id) => {
     await supabase.from('allowed_users').delete().eq('id', id);
 };
 
-window.pinMsg = async (id, text) => {
-    await supabase.from('system_settings').update({ value: { id: id, msg: text } }).eq('key', 'pin');
+window.pinMsg = async (id) => {
+    const msgObj = messageData.find(m => m.id == id);
+    if(msgObj) {
+        await supabase.from('system_settings').update({ value: { id: id, msg: msgObj.msg } }).eq('key', 'pin');
+    }
 };
 
 window.unpinMessage = async () => {
@@ -233,11 +238,14 @@ window.sendAnn = async () => {
 };
 
 window.wipeChat = async () => {
-    if(confirm("Permanently wipe ALL messages? This cannot be undone.")) {
-        // Deleting all rows where ID exists (Supabase hack to wipe table)
-        const { error } = await supabase.from('messages').delete().neq('name', '___NON_EXISTENT___');
+    if(confirm("Permanently wipe ALL messages from EVERYONE? This cannot be undone.")) {
+        // Standard bulk delete filter: delete all where id is not null
+        const { error } = await supabase.from('messages').delete().not('id', 'is', null);
         if(!error) alert("Chat wiped successfully.");
-        else console.error(error);
+        else {
+            console.error(error);
+            alert("Error wiping chat. Check Console.");
+        }
     }
 };
 
