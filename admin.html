@@ -35,8 +35,8 @@
 <div id="status-overlay">AUTHORIZING...</div>
 
 <div id="sidebar">
-    <div class="section"><h3>Pending Requests</h3><table><tbody id="requestTable"></tbody></table></div>
-    <div class="section"><h3>Network Members</h3><table><tbody id="userTable"></tbody></table></div>
+    <div class="section"><h3>Pending Requests</h3><tr><tbody id="requestTable"></tbody></table></div>
+    <div class="section"><h3>Network Members</h3><table><tbody id="userTable"></tbody><tr></div>
     <div class="section">
         <h3>Recent Messages (Admin Tools)</h3>
         <div id="messageList" style="max-height: 400px; overflow-y: auto;"></div>
@@ -47,7 +47,7 @@
     <h3>System Controls</h3>
     <div class="section">
         <p style="font-size:0.85rem; opacity:0.7; margin-bottom: 10px;">Maintenance Mode</p>
-        <button id="maintBtn" style="width:100%; padding:12px;" onclick="toggleMaint()">Loading Status...</button>
+        <button id="maintBtn" style="width:100%; padding:12px;">Loading Status...</button>
     </div>
     <div class="section">
         <p style="font-size:0.85rem; opacity:0.7; margin-bottom: 10px;">Pinned Message</p>
@@ -72,7 +72,16 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 let myUser = null;
 let messageData = [];
 
+// Fix JWT expiration by refreshing session
+async function refreshSession() {
+    const { data: { session }, error } = await supabase.auth.getSession();
+    if (error || !session) {
+        await supabase.auth.signInAnonymously();
+    }
+}
+
 async function checkAuth() {
+    await refreshSession();
     let { data: { session } } = await supabase.auth.getSession();
     if (!session) {
         const { data } = await supabase.auth.signInAnonymously();
@@ -93,6 +102,8 @@ async function checkAuth() {
 function initDashboard() {
     setupRealtime();
     loadMessages();
+    loadMembers();
+    syncSystemUI();
 }
 
 async function setupRealtime() {
@@ -101,9 +112,6 @@ async function setupRealtime() {
         .on('postgres_changes', { event: '*', schema: 'public', table: 'allowed_users' }, () => loadMembers())
         .on('postgres_changes', { event: '*', schema: 'public', table: 'messages' }, () => loadMessages())
         .subscribe();
-
-    syncSystemUI();
-    loadMembers();
 }
 
 async function syncSystemUI() {
@@ -141,7 +149,8 @@ async function loadMembers() {
                 <td style="text-align:right">
                 <button class="btn-action" onclick="renameMember('${u.id}', '${u.username}')">Rename</button>
                 ${!isMe ? `<button class="btn-kick" onclick="kickUser('${u.id}', '${u.username}')">Kick</button>` : ''}
-                ${!isAdmin ? `<button class="btn-warning" onclick="makeAdmin('${u.id}')">Promote</button>` : `<button class="btn-danger" onclick="demoteAdmin('${u.id}')" ${isMe ? 'disabled' : ''}>Demote</button>`}
+                ${!isAdmin && !isMe ? `<button class="btn-warning" onclick="makeAdmin('${u.id}')">Promote</button>` : ''}
+                ${isAdmin && !isMe ? `<button class="btn-danger" onclick="demoteAdmin('${u.id}')">Demote</button>` : ''}
                 ${!isMe ? `<button class="btn-danger" onclick="banUser('${u.id}', '${u.username}')">Ban</button>` : ''}</td></tr>`;
         }
     });
@@ -154,7 +163,7 @@ async function loadMessages() {
     list.innerHTML = "";
     messageData.forEach(m => {
         list.innerHTML += `<div class="msg-preview-item">
-            <b>${m.name}:</b> ${m.msg} <br>
+            <b>${m.name}:</b> ${m.msg.substring(0, 100)} ${m.msg.length > 100 ? '...' : ''}<br>
             <button class="btn-success" onclick="pinMsg('${m.id}')">Pin</button>
             <button class="btn-danger" onclick="deleteMsg('${m.id}')">Delete</button>
         </div>`;
@@ -164,60 +173,144 @@ async function loadMessages() {
 // --- FIXED ACTIONS ---
 
 window.toggleMaint = async () => {
-    const { data } = await supabase.from('system_settings').select('value').eq('key', 'maintenance').single();
-    const newStatus = !data.value.enabled;
-    // Explicitly update and then sync locally
-    await supabase.from('system_settings').update({ value: { enabled: newStatus } }).eq('key', 'maintenance');
-    syncSystemUI(); 
+    const { data: existing } = await supabase.from('system_settings').select('value').eq('key', 'maintenance').single();
+    const newStatus = !existing.value.enabled;
+    await supabase.from('system_settings').upsert({ 
+        key: 'maintenance', 
+        value: { enabled: newStatus } 
+    }, { onConflict: 'key' });
+    syncSystemUI();
 };
 
 window.unpinMessage = async () => {
-    // Ensuring exact JSON structure to override previous data
-    await supabase.from('system_settings').update({ value: { id: "", msg: "" } }).eq('key', 'pin');
+    await supabase.from('system_settings').upsert({ 
+        key: 'pin', 
+        value: { id: null, msg: null } 
+    }, { onConflict: 'key' });
     syncSystemUI();
 };
 
 window.pinMsg = async (id) => {
     const msgObj = messageData.find(m => m.id == id);
     if(msgObj) {
-        await supabase.from('system_settings').update({ value: { id: id, msg: msgObj.msg } }).eq('key', 'pin');
+        await supabase.from('system_settings').upsert({ 
+            key: 'pin', 
+            value: { id: id, msg: msgObj.msg, name: msgObj.name } 
+        }, { onConflict: 'key' });
         syncSystemUI();
     }
 };
 
-// --- REST OF ACTIONS ---
+// --- FIXED USER ACTIONS ---
 
-window.approve = async (id) => { await supabase.from('allowed_users').update({ role: 'user' }).eq('id', id); };
-window.decline = async (id) => { await supabase.from('allowed_users').delete().eq('id', id); };
-window.deleteMsg = async (id) => { if(confirm("Delete this message?")) await supabase.from('messages').delete().eq('id', id); };
-window.makeAdmin = async (id) => { if(confirm("Promote to Admin?")) await supabase.from('allowed_users').update({ role: "admin" }).eq('id', id); };
-window.demoteAdmin = async (id) => { if(confirm("Demote this Admin to User?")) await supabase.from('allowed_users').update({ role: "user" }).eq('id', id); };
+window.approve = async (id) => { 
+    await refreshSession();
+    await supabase.from('allowed_users').update({ role: 'user' }).eq('id', id); 
+    loadMembers();
+};
+
+window.decline = async (id) => { 
+    await refreshSession();
+    await supabase.from('allowed_users').delete().eq('id', id); 
+    loadMembers();
+};
+
+window.deleteMsg = async (id) => { 
+    if(confirm("Delete this message?")) {
+        await refreshSession();
+        await supabase.from('messages').delete().eq('id', id); 
+        loadMessages();
+    }
+};
+
+window.makeAdmin = async (id) => { 
+    if(confirm("Promote to Admin?")) {
+        await refreshSession();
+        await supabase.from('allowed_users').update({ role: "admin" }).eq('id', id); 
+        loadMembers();
+    }
+};
+
+window.demoteAdmin = async (id) => { 
+    if(confirm("Demote this Admin to User?")) {
+        await refreshSession();
+        await supabase.from('allowed_users').update({ role: "user" }).eq('id', id); 
+        loadMembers();
+    }
+};
+
 window.renameMember = async (id, old) => { 
     const n = prompt("New name for " + old + ":");
-    if(n) await supabase.from('allowed_users').update({ username: n }).eq('id', id);
-};
-window.kickUser = async (id, name) => {
-    if(confirm("Kick " + name + "?")) await supabase.from('allowed_users').delete().eq('id', id);
-};
-window.banUser = async (id, name) => {
-    if(confirm("Ban " + name + " permanently?")) await supabase.from('allowed_users').update({ role: 'banned' }).eq('id', id);
+    if(n && n.trim()) {
+        await refreshSession();
+        // Update username in allowed_users
+        await supabase.from('allowed_users').update({ username: n.trim() }).eq('id', id);
+        // Also update all existing messages from this user to show new name
+        await supabase.from('messages').update({ name: n.trim() }).eq('uid', id);
+        loadMembers();
+    }
 };
 
+window.kickUser = async (id, name) => {
+    if(confirm("Kick " + name + "? They will need to re-request access.")) {
+        await refreshSession();
+        // Completely remove user
+        await supabase.from('allowed_users').delete().eq('id', id);
+        loadMembers();
+    }
+};
+
+window.banUser = async (id, name) => {
+    if(confirm("Ban " + name + " permanently? They will never access again.")) {
+        await refreshSession();
+        await supabase.from('allowed_users').update({ role: 'banned' }).eq('id', id);
+        loadMembers();
+    }
+};
+
+// --- FIXED ANNOUNCEMENT ---
 window.sendAnn = async () => {
     const m = document.getElementById("ann-msg");
     const val = m.value.trim();
     if(!val) return;
-    await supabase.from('messages').insert([{ msg: val, name: "SYSTEM", type: "announcement", time: new Date().toISOString() }]);
+    await refreshSession();
+    await supabase.from('messages').insert([{ 
+        uid: myUser.id,
+        msg: val, 
+        name: "🔔 SYSTEM", 
+        type: "announcement", 
+        time: new Date().toISOString(),
+        is_announcement: true,
+        seen_by: []
+    }]);
     m.value = "";
+    loadMessages();
     alert("Announcement Broadcasted!");
 };
 
 window.wipeChat = async () => {
-    if(confirm("Permanently wipe ALL messages?")) {
+    if(confirm("⚠️ PERMANENTLY wipe ALL messages? This cannot be undone!")) {
+        await refreshSession();
         const { error } = await supabase.from('messages').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-        if(!error) alert("Chat wiped.");
+        if(!error) {
+            alert("Chat wiped.");
+            loadMessages();
+        } else {
+            alert("Error: " + error.message);
+        }
     }
 };
+
+// Refresh session periodically to prevent JWT expiration
+setInterval(refreshSession, 300000); // Every 5 minutes
+
+// Attach toggleMaint to button after DOM loads
+document.addEventListener('DOMContentLoaded', () => {
+    const maintBtn = document.getElementById("maintBtn");
+    if(maintBtn) {
+        maintBtn.onclick = window.toggleMaint;
+    }
+});
 
 checkAuth();
 </script>
