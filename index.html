@@ -125,7 +125,7 @@
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm'
 
 const SUPABASE_URL = "https://pgdytywttdrqakczrprg.supabase.co";
-const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBnZHl0eXd0dGRycWFrY3pycHJnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY1MzMzMjYsImV4cCI6MjA5MjEwOTMyNn0.Owa5xlrvrw0p0lJ1AEqIxnudvTyxSSjKqZgX48j2KQA";
+const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBnZHl0eXd0dGRycWFrY3pycHJnIicm9sZSI6ImFub24iLCJpYXQiOjE3NzY1MzMzMjYsImV4cCI6MjA5MjEwOTMyNn0.Owa5xlrvrw0p0lJ1AEqIxnudvTyxSSjKqZgX48j2KQA";
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
 let currentReply = null;
@@ -142,13 +142,19 @@ async function refreshSession() {
     const { data: { session }, error } = await supabase.auth.getSession();
     if (error || !session) {
         await supabase.auth.signInAnonymously();
+    } else if (session) {
+        // Try to refresh existing session
+        const { data: refreshData } = await supabase.auth.refreshSession();
+        if (!refreshData.session) {
+            await supabase.auth.signInAnonymously();
+        }
     }
 }
 
 // Check maintenance mode
 async function checkMaintenance() {
-    const { data } = await supabase.from('system_settings').select('value').eq('key', 'maintenance').single();
-    if (data) {
+    const { data } = await supabase.from('system_settings').select('*').eq('key', 'maintenance').single();
+    if (data && data.value) {
         maintenanceMode = data.value.enabled || false;
         const maintOverlay = document.getElementById("maint-overlay");
         const inputFields = document.getElementById("input-fields");
@@ -170,13 +176,13 @@ async function checkMaintenance() {
 
 // Check pinned message
 async function checkPinnedMessage() {
-    const { data } = await supabase.from('system_settings').select('value').eq('key', 'pin').single();
+    const { data } = await supabase.from('system_settings').select('*').eq('key', 'pin').single();
     if (data && data.value && data.value.id && data.value.msg) {
         const pinnedContainer = document.getElementById("pinned-container");
         const pinnedText = document.getElementById("pinned-text");
         pinnedText.innerText = `📌 ${data.value.msg.substring(0, 100)}`;
         pinnedContainer.style.display = "flex";
-        pinnedContainer.dataset.targetId = data.value.id;
+        pinnedContainer.dataset.targetId = String(data.value.id);
     } else {
         document.getElementById("pinned-container").style.display = "none";
     }
@@ -239,9 +245,13 @@ function appendMsg(m, isBulk = false) {
     const align = isMe ? 'my-msg' : 'other-msg';
     const timeStr = new Date(m.time).toLocaleTimeString('en-US', { timeZone: 'Asia/Dhaka', hour: '2-digit', minute: '2-digit', hour12: true });
 
-    // Mark as seen if not my message
+    // Mark as seen if not my message and I haven't seen it yet
     if (!isMe && m.seen_by && !m.seen_by.includes(myUsername)) {
         markAsSeen(m.id, m.seen_by);
+    }
+    // If seen_by is null/undefined, initialize it
+    if (!isMe && !m.seen_by) {
+        markAsSeen(m.id, []);
     }
 
     const msgDiv = document.createElement('div');
@@ -330,7 +340,11 @@ async function updateMemberList() {
     list.innerHTML = ""; 
     let typers = [];
     const now = Date.now();
+    if (!data) return;
+    
     data?.forEach(u => {
+        if (u.role === 'banned' || u.role === 'pending' || u.role === 'declined') return;
+        
         const lastActive = Number(u.last_seen);
         if (!lastActive) return;
         const diffMs = now - lastActive;
@@ -349,6 +363,15 @@ document.getElementById("reqBtn").onclick = async () => {
     const name = document.getElementById("req-name").value.trim();
     if (!name) return alert("Enter a nickname");
     await refreshSession();
+    
+    // Check if banned first
+    const { data: existingUser } = await supabase.from('allowed_users').select('*').eq('id', myUser.id).single();
+    if (existingUser && existingUser.role === 'banned') {
+        document.getElementById("req-status").innerText = "⚠️ You are banned from this chat. ⚠️";
+        document.getElementById("reqBtn").disabled = true;
+        return;
+    }
+    
     const { error } = await supabase.from('allowed_users').insert([{ id: myUser.id, username: name, role: 'pending', last_seen: Date.now() }]);
     if (error) { 
         document.getElementById("req-status").innerText = "Error: " + error.message; 
@@ -388,16 +411,20 @@ function setupRealtime() {
             } else if (payload.eventType === 'UPDATE') {
                 const el = document.getElementById(`msg-${payload.new.id}`);
                 if (el) {
-                    el.querySelector('.msg-content').innerText = payload.new.msg;
+                    const msgContent = el.querySelector('.msg-content');
+                    if (msgContent) msgContent.innerText = payload.new.msg;
                     const editArea = el.querySelector('.edit-status');
-                    editArea.innerHTML = payload.new.edited ? '<span style="font-size: 0.7rem; opacity: 0.5; font-style: italic; margin-left: 5px;">(edited)</span>' : '';
+                    if (editArea) editArea.innerHTML = payload.new.edited ? '<span style="font-size: 0.7rem; opacity: 0.5; font-style: italic; margin-left: 5px;">(edited)</span>' : '';
                     updateSeenUI(payload.new.id, payload.new.seen_by);
                 }
             } else if (payload.eventType === 'DELETE') {
-                document.getElementById(`msg-${payload.old.id}`)?.remove();
+                const msgEl = document.getElementById(`msg-${payload.old.id}`);
+                if (msgEl) msgEl.remove();
             }
         })
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'allowed_users' }, () => { updateMemberList(); })
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'allowed_users' }, () => { 
+            updateMemberList(); 
+        })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'system_settings' }, () => { 
             checkMaintenance();
             checkPinnedMessage();
@@ -414,6 +441,7 @@ async function init() {
     }
     if (!session) return;
     myUser = session.user;
+    
     const { data: profile } = await supabase.from('allowed_users').select('*').eq('id', myUser.id).single();
     document.getElementById("status").style.display = "none";
     
@@ -445,7 +473,7 @@ async function init() {
         setInterval(() => {
             checkMaintenance();
             checkPinnedMessage();
-        }, 5000);
+        }, 3000); // Check more frequently for updates
     }
 }
 
@@ -484,7 +512,10 @@ window.cancelReply = () => { currentReply = null; document.getElementById("reply
 window.startEdit = (id) => { 
     if (maintenanceMode) return;
     editingId = id; 
-    document.getElementById("msg").value = document.querySelector(`#msg-${id} .msg-content`).innerText;
+    const msgContent = document.querySelector(`#msg-${id} .msg-content`);
+    if (msgContent) {
+        document.getElementById("msg").value = msgContent.innerText;
+    }
     document.getElementById("msg").focus();
     document.getElementById("sendBtn").innerText = "Update"; 
 };
@@ -500,10 +531,14 @@ document.getElementById("nameBtn").onclick = async () => {
     const newName = prompt("Enter your new nickname:", myUsername);
     if (newName && newName.trim() !== "" && newName !== myUsername) {
         await refreshSession();
-        const { error } = await supabase.from('allowed_users').update({ username: newName.trim() }).eq('id', myUser.id);
-        if (error) alert("Error: " + error.message);
-        else {
-            myUsername = newName.trim();
+        const trimmedName = newName.trim();
+        const { error } = await supabase.from('allowed_users').update({ username: trimmedName }).eq('id', myUser.id);
+        if (error) {
+            alert("Error: " + error.message);
+        } else {
+            // Update all messages from this user
+            await supabase.from('messages').update({ name: trimmedName }).eq('uid', myUser.id);
+            myUsername = trimmedName;
             document.getElementById("display-name").innerText = myUsername;
             updateMemberList();
         }

@@ -35,8 +35,8 @@
 <div id="status-overlay">AUTHORIZING...</div>
 
 <div id="sidebar">
-    <div class="section"><h3>Pending Requests</h3><tr><tbody id="requestTable"></tbody></table></div>
-    <div class="section"><h3>Network Members</h3><table><tbody id="userTable"></tbody><tr></div>
+    <div class="section"><h3>Pending Requests</h3><table><tbody id="requestTable"></tbody></table></div>
+    <div class="section"><h3>Network Members</h3><table><tbody id="userTable"></tbody></table></div>
     <div class="section">
         <h3>Recent Messages (Admin Tools)</h3>
         <div id="messageList" style="max-height: 400px; overflow-y: auto;"></div>
@@ -77,6 +77,12 @@ async function refreshSession() {
     const { data: { session }, error } = await supabase.auth.getSession();
     if (error || !session) {
         await supabase.auth.signInAnonymously();
+    } else if (session) {
+        // If session exists but might be expired, try to refresh
+        const { data: refreshData } = await supabase.auth.refreshSession();
+        if (!refreshData.session) {
+            await supabase.auth.signInAnonymously();
+        }
     }
 }
 
@@ -107,7 +113,7 @@ function initDashboard() {
 }
 
 async function setupRealtime() {
-    supabase.channel('db_changes')
+    supabase.channel('admin_db_changes')
         .on('postgres_changes', { event: '*', schema: 'public', table: 'system_settings' }, () => syncSystemUI())
         .on('postgres_changes', { event: '*', schema: 'public', table: 'allowed_users' }, () => loadMembers())
         .on('postgres_changes', { event: '*', schema: 'public', table: 'messages' }, () => loadMessages())
@@ -125,7 +131,11 @@ async function syncSystemUI() {
 
     const pin = settings.find(s => s.key === 'pin')?.value;
     const pinDiv = document.getElementById("active-pin");
-    pinDiv.innerText = (pin && pin.msg) ? "Current: " + pin.msg : "None";
+    if (pin && pin.msg) {
+        pinDiv.innerText = "Current: " + pin.msg;
+    } else {
+        pinDiv.innerText = "None";
+    }
 }
 
 async function loadMembers() {
@@ -134,6 +144,8 @@ async function loadMembers() {
     const userTable = document.getElementById("userTable");
     reqTable.innerHTML = "";
     userTable.innerHTML = "";
+
+    if (!users) return;
 
     users?.forEach(u => {
         if (u.role === 'pending') {
@@ -173,8 +185,9 @@ async function loadMessages() {
 // --- FIXED ACTIONS ---
 
 window.toggleMaint = async () => {
-    const { data: existing } = await supabase.from('system_settings').select('value').eq('key', 'maintenance').single();
-    const newStatus = !existing.value.enabled;
+    await refreshSession();
+    const { data: existing } = await supabase.from('system_settings').select('*').eq('key', 'maintenance').single();
+    const newStatus = existing ? !existing.value.enabled : true;
     await supabase.from('system_settings').upsert({ 
         key: 'maintenance', 
         value: { enabled: newStatus } 
@@ -183,19 +196,21 @@ window.toggleMaint = async () => {
 };
 
 window.unpinMessage = async () => {
+    await refreshSession();
     await supabase.from('system_settings').upsert({ 
         key: 'pin', 
-        value: { id: null, msg: null } 
+        value: { id: null, msg: null, name: null } 
     }, { onConflict: 'key' });
     syncSystemUI();
 };
 
 window.pinMsg = async (id) => {
+    await refreshSession();
     const msgObj = messageData.find(m => m.id == id);
     if(msgObj) {
         await supabase.from('system_settings').upsert({ 
             key: 'pin', 
-            value: { id: id, msg: msgObj.msg, name: msgObj.name } 
+            value: { id: String(id), msg: msgObj.msg, name: msgObj.name } 
         }, { onConflict: 'key' });
         syncSystemUI();
     }
@@ -243,26 +258,42 @@ window.renameMember = async (id, old) => {
     const n = prompt("New name for " + old + ":");
     if(n && n.trim()) {
         await refreshSession();
+        const newName = n.trim();
         // Update username in allowed_users
-        await supabase.from('allowed_users').update({ username: n.trim() }).eq('id', id);
+        await supabase.from('allowed_users').update({ username: newName }).eq('id', id);
         // Also update all existing messages from this user to show new name
-        await supabase.from('messages').update({ name: n.trim() }).eq('uid', id);
+        await supabase.from('messages').update({ name: newName }).eq('uid', id);
+        // Also update reply_to references in messages that reference this user
+        const { data: userMsgs } = await supabase.from('messages').select('id, reply_to').eq('uid', id);
+        if (userMsgs) {
+            for (let msg of userMsgs) {
+                if (msg.reply_to && msg.reply_to.name === old) {
+                    msg.reply_to.name = newName;
+                    await supabase.from('messages').update({ reply_to: msg.reply_to }).eq('id', msg.id);
+                }
+            }
+        }
         loadMembers();
+        loadMessages();
     }
 };
 
 window.kickUser = async (id, name) => {
     if(confirm("Kick " + name + "? They will need to re-request access.")) {
         await refreshSession();
-        // Completely remove user
+        // DELETE messages from this user
+        await supabase.from('messages').delete().eq('uid', id);
+        // DELETE the user completely
         await supabase.from('allowed_users').delete().eq('id', id);
         loadMembers();
+        loadMessages();
     }
 };
 
 window.banUser = async (id, name) => {
     if(confirm("Ban " + name + " permanently? They will never access again.")) {
         await refreshSession();
+        // Set role to banned - they will be blocked from requesting access
         await supabase.from('allowed_users').update({ role: 'banned' }).eq('id', id);
         loadMembers();
     }
@@ -274,6 +305,10 @@ window.sendAnn = async () => {
     const val = m.value.trim();
     if(!val) return;
     await refreshSession();
+    // Get admin's display name
+    const { data: adminProfile } = await supabase.from('allowed_users').select('username').eq('id', myUser.id).single();
+    const adminName = adminProfile ? adminProfile.username : "Admin";
+    
     await supabase.from('messages').insert([{ 
         uid: myUser.id,
         msg: val, 
@@ -302,7 +337,7 @@ window.wipeChat = async () => {
 };
 
 // Refresh session periodically to prevent JWT expiration
-setInterval(refreshSession, 300000); // Every 5 minutes
+setInterval(refreshSession, 240000); // Every 4 minutes
 
 // Attach toggleMaint to button after DOM loads
 document.addEventListener('DOMContentLoaded', () => {
