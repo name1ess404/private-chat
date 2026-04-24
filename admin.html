@@ -72,26 +72,35 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 let myUser = null;
 let messageData = [];
 
-// Fix JWT expiration by refreshing session
-async function refreshSession() {
-    const { data: { session }, error } = await supabase.auth.getSession();
-    if (error || !session) {
-        await supabase.auth.signInAnonymously();
-    } else if (session) {
-        // If session exists but might be expired, try to refresh
-        const { data: refreshData } = await supabase.auth.refreshSession();
-        if (!refreshData.session) {
-            await supabase.auth.signInAnonymously();
-        }
+// ✅ Simplified auth - no broken refreshSession calls
+async function ensureAuth() {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session?.user) {
+        myUser = session.user;
+        return session;
     }
+    const { data, error } = await supabase.auth.signInAnonymously();
+    if (error) {
+        console.error('Auth sign-in failed:', error);
+        await new Promise(r => setTimeout(r, 2000));
+        const { data: retryData, error: retryError } = await supabase.auth.signInAnonymously();
+        if (retryError) {
+            console.error('Auth retry also failed:', retryError);
+            document.getElementById("status-overlay").innerText = "Connection error. Refresh page.";
+            return null;
+        }
+        myUser = retryData.session?.user;
+        return retryData.session;
+    }
+    myUser = data.session?.user;
+    return data.session;
 }
 
 async function checkAuth() {
-    await refreshSession();
-    let { data: { session } } = await supabase.auth.getSession();
+    const session = await ensureAuth();
     if (!session) {
-        const { data } = await supabase.auth.signInAnonymously();
-        session = data.session;
+        document.getElementById("status-overlay").innerText = "AUTH FAILED - REFRESH";
+        return;
     }
     myUser = session.user;
 
@@ -185,7 +194,7 @@ async function loadMessages() {
 // --- FIXED ACTIONS ---
 
 window.toggleMaint = async () => {
-    await refreshSession();
+    await ensureAuth();
     const { data: existing } = await supabase.from('system_settings').select('*').eq('key', 'maintenance').single();
     const newStatus = existing ? !existing.value.enabled : true;
     await supabase.from('system_settings').upsert({ 
@@ -196,7 +205,7 @@ window.toggleMaint = async () => {
 };
 
 window.unpinMessage = async () => {
-    await refreshSession();
+    await ensureAuth();
     await supabase.from('system_settings').upsert({ 
         key: 'pin', 
         value: { id: null, msg: null, name: null } 
@@ -205,7 +214,7 @@ window.unpinMessage = async () => {
 };
 
 window.pinMsg = async (id) => {
-    await refreshSession();
+    await ensureAuth();
     const msgObj = messageData.find(m => m.id == id);
     if(msgObj) {
         await supabase.from('system_settings').upsert({ 
@@ -219,20 +228,20 @@ window.pinMsg = async (id) => {
 // --- FIXED USER ACTIONS ---
 
 window.approve = async (id) => { 
-    await refreshSession();
+    await ensureAuth();
     await supabase.from('allowed_users').update({ role: 'user' }).eq('id', id); 
     loadMembers();
 };
 
 window.decline = async (id) => { 
-    await refreshSession();
+    await ensureAuth();
     await supabase.from('allowed_users').delete().eq('id', id); 
     loadMembers();
 };
 
 window.deleteMsg = async (id) => { 
     if(confirm("Delete this message?")) {
-        await refreshSession();
+        await ensureAuth();
         await supabase.from('messages').delete().eq('id', id); 
         loadMessages();
     }
@@ -240,7 +249,7 @@ window.deleteMsg = async (id) => {
 
 window.makeAdmin = async (id) => { 
     if(confirm("Promote to Admin?")) {
-        await refreshSession();
+        await ensureAuth();
         await supabase.from('allowed_users').update({ role: "admin" }).eq('id', id); 
         loadMembers();
     }
@@ -248,7 +257,7 @@ window.makeAdmin = async (id) => {
 
 window.demoteAdmin = async (id) => { 
     if(confirm("Demote this Admin to User?")) {
-        await refreshSession();
+        await ensureAuth();
         await supabase.from('allowed_users').update({ role: "user" }).eq('id', id); 
         loadMembers();
     }
@@ -257,16 +266,26 @@ window.demoteAdmin = async (id) => {
 window.renameMember = async (id, old) => { 
     const n = prompt("New name for " + old + ":");
     if(n && n.trim()) {
-        await refreshSession();
+        await ensureAuth();
         const newName = n.trim();
         // Update username in allowed_users
         await supabase.from('allowed_users').update({ username: newName }).eq('id', id);
-        // Also update all existing messages from this user to show new name
+        // Update all messages FROM this user
         await supabase.from('messages').update({ name: newName }).eq('uid', id);
-        // Also update reply_to references in messages that reference this user
+        // Update reply_to references in messages BY this user (where they quoted someone)
         const { data: userMsgs } = await supabase.from('messages').select('id, reply_to').eq('uid', id);
         if (userMsgs) {
             for (let msg of userMsgs) {
+                if (msg.reply_to && msg.reply_to.name === old) {
+                    msg.reply_to.name = newName;
+                    await supabase.from('messages').update({ reply_to: msg.reply_to }).eq('id', msg.id);
+                }
+            }
+        }
+        // ✅ Also update reply_to references in OTHER users' messages that reference this user
+        const { data: allMsgs } = await supabase.from('messages').select('id, reply_to').not('uid', 'eq', id);
+        if (allMsgs) {
+            for (let msg of allMsgs) {
                 if (msg.reply_to && msg.reply_to.name === old) {
                     msg.reply_to.name = newName;
                     await supabase.from('messages').update({ reply_to: msg.reply_to }).eq('id', msg.id);
@@ -280,7 +299,7 @@ window.renameMember = async (id, old) => {
 
 window.kickUser = async (id, name) => {
     if(confirm("Kick " + name + "? They will need to re-request access.")) {
-        await refreshSession();
+        await ensureAuth();
         // DELETE messages from this user
         await supabase.from('messages').delete().eq('uid', id);
         // DELETE the user completely
@@ -292,7 +311,7 @@ window.kickUser = async (id, name) => {
 
 window.banUser = async (id, name) => {
     if(confirm("Ban " + name + " permanently? They will never access again.")) {
-        await refreshSession();
+        await ensureAuth();
         // Set role to banned - they will be blocked from requesting access
         await supabase.from('allowed_users').update({ role: 'banned' }).eq('id', id);
         loadMembers();
@@ -304,10 +323,9 @@ window.sendAnn = async () => {
     const m = document.getElementById("ann-msg");
     const val = m.value.trim();
     if(!val) return;
-    await refreshSession();
+    await ensureAuth();
     // Get admin's display name
     const { data: adminProfile } = await supabase.from('allowed_users').select('username').eq('id', myUser.id).single();
-    const adminName = adminProfile ? adminProfile.username : "Admin";
     
     await supabase.from('messages').insert([{ 
         uid: myUser.id,
@@ -325,7 +343,7 @@ window.sendAnn = async () => {
 
 window.wipeChat = async () => {
     if(confirm("⚠️ PERMANENTLY wipe ALL messages? This cannot be undone!")) {
-        await refreshSession();
+        await ensureAuth();
         const { error } = await supabase.from('messages').delete().neq('id', '00000000-0000-0000-0000-000000000000');
         if(!error) {
             alert("Chat wiped.");
@@ -336,16 +354,22 @@ window.wipeChat = async () => {
     }
 };
 
-// Refresh session periodically to prevent JWT expiration
-setInterval(refreshSession, 240000); // Every 4 minutes
-
-// Attach toggleMaint to button after DOM loads
-document.addEventListener('DOMContentLoaded', () => {
-    const maintBtn = document.getElementById("maintBtn");
-    if(maintBtn) {
-        maintBtn.onclick = window.toggleMaint;
+// Light periodic session check - only re-auth if session is completely gone
+setInterval(async () => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) {
+        console.log('Session lost, re-authenticating...');
+        await supabase.auth.signInAnonymously().catch(() => {});
+        // Reload page to refresh all data with new session
+        location.reload();
     }
-});
+}, 240000); // Every 4 minutes
+
+// ✅ Attach toggleMaint directly (DOM is ready since script is at end of body)
+const maintBtn = document.getElementById("maintBtn");
+if(maintBtn) {
+    maintBtn.onclick = window.toggleMaint;
+}
 
 checkAuth();
 </script>
